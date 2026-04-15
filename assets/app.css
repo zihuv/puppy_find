@@ -1,0 +1,385 @@
+:root {
+    --bg: #f3f4f6;
+    --panel: #ffffff;
+    --line: #d1d5db;
+    --text: #111827;
+    --muted: #6b7280;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --success-bg: #dcfce7;
+    --success-text: #166534;
+    --danger-bg: #fee2e2;
+    --danger-text: #b91c1c;
+    --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+[x-cloak] {
+    display: none !important;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+img {
+    display: block;
+    max-width: 100%;
+}
+
+.page {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 32px 16px 48px;
+}
+
+.page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.page-head h1 {
+    margin: 0 0 8px;
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.page-head p {
+    margin: 0;
+    color: var(--muted);
+}
+
+.panel {
+    margin-bottom: 16px;
+    padding: 20px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+}
+
+.status-panel {
+    padding-top: 16px;
+    padding-bottom: 16px;
+}
+
+.section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.section-head h2 {
+    margin: 0;
+    font-size: 1.05rem;
+}
+
+.badge,
+.count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 999px;
+    font-size: 0.875rem;
+    color: var(--muted);
+    background: #f9fafb;
+    border: 1px solid var(--line);
+}
+
+.badge.running {
+    color: var(--success-text);
+    background: var(--success-bg);
+    border-color: #bbf7d0;
+}
+
+.status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.status-text {
+    min-width: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.field {
+    display: block;
+    margin-bottom: 14px;
+}
+
+.field span {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.875rem;
+    color: var(--muted);
+}
+
+.field input,
+.search-row input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    outline: none;
+}
+
+.field input:focus,
+.search-row input:focus {
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.actions,
+.search-row {
+    display: flex;
+    gap: 12px;
+}
+
+.search-row {
+    align-items: stretch;
+}
+
+.search-row input {
+    flex: 1;
+    min-width: 0;
+    padding: 14px 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+}
+
+.search-row > button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: 110px;
+    padding: 0 24px;
+    border-radius: 14px;
+}
+
+button {
+    border: 0;
+    border-radius: 10px;
+    padding: 10px 16px;
+    background: #e5e7eb;
+    color: var(--text);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+    background: #d1d5db;
+}
+
+button.ghost {
+    background: #fff;
+    border: 1px solid var(--line);
+}
+
+button.primary {
+    background: var(--primary);
+    color: #fff;
+}
+
+.icon-button {
+    padding: 8px 12px;
+}
+
+button.primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.progress {
+    display: grid;
+    grid-template-columns: 120px 120px minmax(0, 1fr);
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.progress.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.progress div {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #f9fafb;
+}
+
+.progress span {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.75rem;
+    color: var(--muted);
+}
+
+.progress strong {
+    display: block;
+    font-size: 0.95rem;
+}
+
+.progress .wide {
+    min-width: 0;
+}
+
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.message,
+.error {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+}
+
+.message {
+    color: var(--success-text);
+    background: var(--success-bg);
+}
+
+.error {
+    color: var(--danger-text);
+    background: var(--danger-bg);
+}
+
+.results {
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 16px;
+}
+
+.card {
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+}
+
+.card img {
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+    background: #e5e7eb;
+}
+
+.card-body {
+    padding: 12px;
+}
+
+.card-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.card-row strong,
+.card-row span {
+    font-size: 0.9rem;
+}
+
+.path {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--muted);
+    word-break: break-all;
+}
+
+.empty {
+    padding: 20px 0;
+    text-align: center;
+    color: var(--muted);
+}
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.32);
+}
+
+.modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.modal-card {
+    width: min(560px, 100%);
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    padding: 20px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
+}
+
+.modal-head {
+    margin-bottom: 18px;
+}
+
+@media (max-width: 720px) {
+    .actions,
+    .search-row,
+    .section-head,
+    .status-row,
+    .page-head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .progress {
+        grid-template-columns: 1fr;
+    }
+
+    .badge,
+    .count {
+        width: fit-content;
+    }
+
+    .modal {
+        align-items: flex-start;
+        padding-top: 24px;
+    }
+}

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PuppyFind</title>
+    <link rel="stylesheet" href="/assets/app.css">
+    <script defer src="/assets/app.js"></script>
+    <script defer src="/assets/vendor/alpine.min.js"></script>
+</head>
+
+<body>
+    <div class="page" x-data="puppyFind()" x-init="init()">
+        <header class="page-head">
+            <div>
+                <h1>PuppyFind</h1>
+
+            </div>
+            <button class="ghost" @click="openSettings()">配置</button>
+        </header>
+
+
+
+
+        <div class="search-row">
+            <input x-model.trim="query" @keydown.enter.prevent="search()" type="text" placeholder="输入关键词，比如：草地上的小狗">
+            <button class="primary" @click="search()" :disabled="searching">
+                <span>搜索</span>
+            </button>
+        </div>
+        <section class="results" x-show="results.length">
+            <template x-for="item in results" :key="item.id">
+                <article class="card">
+                    <img :src="item.image_url" :alt="item.file_name" loading="lazy">
+                    <div class="card-body">
+                        <div class="card-row">
+                            <strong x-text="item.file_name"></strong>
+                            <span x-text="item.score.toFixed(4)"></span>
+                        </div>
+                        <p class="path" x-text="item.path"></p>
+                    </div>
+                </article>
+            </template>
+        </section>
+
+
+
+        <div class="modal-backdrop" x-show="showSettings" x-transition.opacity @click="closeSettings()" x-cloak></div>
+        <section class="modal" x-show="showSettings" x-transition @keydown.escape.window="closeSettings()" x-cloak>
+            <div class="modal-card">
+                <div class="section-head modal-head">
+                    <h2>配置</h2>
+                    <button class="icon-button" @click="closeSettings()">关闭</button>
+                </div>
+
+                <label class="field">
+                    <span>模型目录</span>
+                    <input x-model.trim="form.model_dir" type="text" placeholder="D:/models/chinese_clip_bundle">
+                </label>
+
+                <label class="field">
+                    <span>图片目录</span>
+                    <input x-model.trim="form.image_dir" type="text" placeholder="D:/photos">
+                </label>
+
+                <div class="progress compact">
+                    <div>
+                        <span>总数</span>
+                        <strong x-text="indexStatus.total"></strong>
+                    </div>
+                    <div>
+                        <span>已处理</span>
+                        <strong x-text="indexStatus.processed"></strong>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button @click="saveSettings()" :disabled="saving || indexStatus.running">
+                        <span x-text="saving ? '保存中...' : '保存配置'"></span>
+                    </button>
+                    <button class="primary" @click="startIndex()" :disabled="indexStatus.running || saving">
+                        <span x-text="indexStatus.running ? '索引中...' : '开始建索引'"></span>
+                    </button>
+                </div>
+            </div>
+        </section>
+    </div>
+</body>
+
+</html>
