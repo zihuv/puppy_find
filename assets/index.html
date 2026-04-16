@@ -55,13 +55,28 @@
                 </div>
 
                 <label class="field">
-                    <span>模型目录</span>
-                    <input x-model.trim="form.model_dir" type="text" placeholder="D:/models/chinese_clip_bundle">
+                    <span>数据库文件位置</span>
+                    <input x-model.trim="form.db_path" type="text" placeholder="./puppy_find.db">
                 </label>
 
                 <label class="field">
-                    <span>图片目录</span>
-                    <input x-model.trim="form.image_dir" type="text" placeholder="D:/photos">
+                    <span>MODEL_PATH</span>
+                    <input x-model.trim="form.model_path" type="text" placeholder="./models/chinese_clip_bundle">
+                </label>
+
+                <label class="field">
+                    <span>HOST</span>
+                    <input x-model.trim="form.host" type="text" placeholder="127.0.0.1">
+                </label>
+
+                <label class="field">
+                    <span>PORT</span>
+                    <input x-model.number="form.port" type="number" min="0" max="65535" placeholder="3000">
+                </label>
+
+                <label class="field">
+                    <span>素材目录</span>
+                    <input x-model.trim="form.asset_dir" type="text" placeholder="./materials">
                 </label>
 
                 <div class="progress compact">

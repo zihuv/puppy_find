@@ -16,14 +16,15 @@ pub struct SearchItem {
 
 pub fn run_search(state: &AppState, query: &str, limit: usize) -> Result<Vec<SearchItem>> {
     let settings = state.settings();
-    if settings.model_dir.is_empty() || settings.image_dir.is_empty() {
-        return Err(anyhow!("请先保存模型目录和图片目录"));
+    if settings.model_path.is_empty() || settings.asset_dir.is_empty() {
+        return Err(anyhow!("请先保存 MODEL_PATH 和素材目录"));
     }
 
+    let db_path = state.db_path();
     let query_vector = state
         .model_manager()
-        .embed_text(settings.model_dir.as_ref(), query)?;
-    let images = db::list_search_images(state.db_path())?;
+        .embed_text(settings.model_path.as_ref(), query)?;
+    let images = db::list_search_images(&db_path)?;
 
     if images.is_empty() {
         return Err(anyhow!("请先建立索引"));

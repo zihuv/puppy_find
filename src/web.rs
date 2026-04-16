@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 
 use crate::app_state::AppState;
-use crate::db::{self, AppSettings};
+use crate::config::{self, AppSettings};
+use crate::db;
 use crate::{indexer, model, search};
 
 #[derive(RustEmbed)]
@@ -42,8 +43,17 @@ async fn asset(Path(path): Path<String>) -> Result<Response<Body>, ApiError> {
     serve_asset(&path)
 }
 
-async fn get_settings(State(state): State<Arc<AppState>>) -> Json<AppSettings> {
-    Json(state.settings())
+async fn get_settings(State(state): State<Arc<AppState>>) -> Json<SettingsView> {
+    let settings = state.settings();
+    let needs_setup = config::needs_setup(&settings);
+    Json(SettingsView {
+        db_path: settings.db_path,
+        model_path: settings.model_path,
+        host: settings.host,
+        port: settings.port,
+        asset_dir: settings.asset_dir,
+        needs_setup,
+    })
 }
 
 async fn save_settings(
@@ -56,20 +66,40 @@ async fn save_settings(
         )));
     }
 
-    let model_dir = model::validate_model_dir(&payload.model_dir).map_err(ApiError::bad_request)?;
-    let image_dir = model::validate_image_dir(&payload.image_dir).map_err(ApiError::bad_request)?;
+    let db_path = config::validate_db_path(state.workspace_dir(), &payload.db_path)
+        .map_err(ApiError::bad_request)?;
+    let model_path =
+        model::validate_model_dir(&payload.model_path).map_err(ApiError::bad_request)?;
+    let asset_dir = model::validate_asset_dir(&payload.asset_dir).map_err(ApiError::bad_request)?;
+    let host = config::validate_host(&payload.host).map_err(ApiError::bad_request)?;
 
     let new_settings = AppSettings {
-        model_dir,
-        image_dir,
+        db_path,
+        model_path,
+        host,
+        port: payload.port,
+        asset_dir,
     };
     let old_settings = state.settings();
-    let changed = old_settings != new_settings;
+    let db_path_changed = old_settings.db_path != new_settings.db_path;
+    let index_data_changed = old_settings.db_path != new_settings.db_path
+        || old_settings.model_path != new_settings.model_path
+        || old_settings.asset_dir != new_settings.asset_dir;
+    let should_clear_images = old_settings.model_path != new_settings.model_path
+        || old_settings.asset_dir != new_settings.asset_dir;
+    let restart_required =
+        old_settings.host != new_settings.host || old_settings.port != new_settings.port;
+    let active_db_path = config::resolve_path(state.workspace_dir(), &new_settings.db_path);
 
-    db::save_settings(state.db_path(), &new_settings).map_err(ApiError::internal)?;
+    if db_path_changed {
+        db::init(&active_db_path).map_err(ApiError::internal)?;
+    }
 
-    if changed {
-        db::clear_images(state.db_path()).map_err(ApiError::internal)?;
+    if should_clear_images {
+        db::clear_images(&active_db_path).map_err(ApiError::internal)?;
+    }
+
+    if index_data_changed {
         state.model_manager().clear();
         state.update_index_status(|status| {
             status.total = 0;
@@ -79,20 +109,30 @@ async fn save_settings(
         });
     }
 
+    config::save(state.workspace_dir(), &new_settings).map_err(ApiError::internal)?;
     state.replace_settings(new_settings.clone());
 
     Ok(Json(SettingsResponse {
-        model_dir: new_settings.model_dir,
-        image_dir: new_settings.image_dir,
-        index_cleared: changed,
+        db_path: new_settings.db_path,
+        model_path: new_settings.model_path,
+        host: new_settings.host,
+        port: new_settings.port,
+        asset_dir: new_settings.asset_dir,
+        index_cleared: index_data_changed,
+        restart_required,
     }))
 }
 
 async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
     let settings = state.settings();
-    if settings.model_dir.is_empty() || settings.image_dir.is_empty() {
-        return Err(ApiError::bad_request(anyhow!("请先保存模型目录和图片目录")));
+    if settings.model_path.is_empty() || settings.asset_dir.is_empty() {
+        return Err(ApiError::bad_request(anyhow!(
+            "请先保存 MODEL_PATH 和素材目录"
+        )));
     }
+
+    model::validate_model_dir(&settings.model_path).map_err(ApiError::bad_request)?;
+    model::validate_existing_asset_dir(&settings.asset_dir).map_err(ApiError::bad_request)?;
 
     if !state.try_start_indexing() {
         return Ok((
@@ -142,7 +182,8 @@ async fn get_image(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Response<Body>, ApiError> {
-    let path = db::get_image_path(state.db_path(), id)
+    let db_path = state.db_path();
+    let path = db::get_image_path(&db_path, id)
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found("图片不存在"))?;
     let bytes = fs::read(&path)
@@ -200,9 +241,23 @@ struct MessageResponse {
 
 #[derive(Debug, Serialize)]
 struct SettingsResponse {
-    model_dir: String,
-    image_dir: String,
+    db_path: String,
+    model_path: String,
+    host: String,
+    port: u16,
+    asset_dir: String,
     index_cleared: bool,
+    restart_required: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct SettingsView {
+    db_path: String,
+    model_path: String,
+    host: String,
+    port: u16,
+    asset_dir: String,
+    needs_setup: bool,
 }
 
 #[derive(Debug)]

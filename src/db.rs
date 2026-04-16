@@ -1,18 +1,12 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
 use std::io;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub struct AppSettings {
-    pub model_dir: String,
-    pub image_dir: String,
-}
 
 #[derive(Debug, Clone)]
 pub struct IndexedImageSnapshot {
@@ -48,13 +42,6 @@ pub fn init(db_path: &Path) -> Result<()> {
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
 
-        CREATE TABLE IF NOT EXISTS settings (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            model_dir TEXT NOT NULL,
-            image_dir TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
         CREATE TABLE IF NOT EXISTS images (
             id INTEGER PRIMARY KEY,
             path TEXT NOT NULL UNIQUE,
@@ -68,43 +55,6 @@ pub fn init(db_path: &Path) -> Result<()> {
         );
         "#,
     )?;
-
-    Ok(())
-}
-
-pub fn load_settings(db_path: &Path) -> Result<Option<AppSettings>> {
-    let connection = open_connection(db_path)?;
-    let settings = connection
-        .query_row(
-            "SELECT model_dir, image_dir FROM settings WHERE id = 1",
-            [],
-            |row| {
-                Ok(AppSettings {
-                    model_dir: row.get(0)?,
-                    image_dir: row.get(1)?,
-                })
-            },
-        )
-        .optional()?;
-
-    Ok(settings)
-}
-
-pub fn save_settings(db_path: &Path, settings: &AppSettings) -> Result<()> {
-    let mut connection = open_connection(db_path)?;
-    let transaction = connection.transaction()?;
-    transaction.execute(
-        r#"
-        INSERT INTO settings (id, model_dir, image_dir, updated_at)
-        VALUES (1, ?1, ?2, ?3)
-        ON CONFLICT(id) DO UPDATE SET
-            model_dir = excluded.model_dir,
-            image_dir = excluded.image_dir,
-            updated_at = excluded.updated_at
-        "#,
-        params![settings.model_dir, settings.image_dir, now_rfc3339()?],
-    )?;
-    transaction.commit()?;
 
     Ok(())
 }
@@ -241,6 +191,18 @@ pub fn get_image_path(db_path: &Path, id: i64) -> Result<Option<String>> {
 }
 
 fn open_connection(db_path: &Path) -> Result<Connection> {
+    if let Some(parent) = db_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create database parent directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
     let connection = Connection::open(db_path)
         .with_context(|| format!("failed to open database at {}", db_path.display()))?;
     Ok(connection)

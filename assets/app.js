@@ -1,8 +1,11 @@
 function puppyFind() {
     return {
         form: {
-            model_dir: '',
-            image_dir: ''
+            db_path: '',
+            model_path: '',
+            host: '127.0.0.1',
+            port: 3000,
+            asset_dir: ''
         },
         query: '',
         results: [],
@@ -32,11 +35,11 @@ function puppyFind() {
             try {
                 const response = await fetch('/api/settings');
                 const data = await this.parseJson(response);
-                this.form.model_dir = data.model_dir || '';
-                this.form.image_dir = data.image_dir || '';
-                if (!this.form.model_dir || !this.form.image_dir) {
-                    this.showSettings = true;
-                }
+                this.form.db_path = data.db_path || '';
+                this.form.model_path = data.model_path || '';
+                this.form.host = data.host || '127.0.0.1';
+                this.form.port = Number(data.port || 3000);
+                this.form.asset_dir = data.asset_dir || '';
             } catch (error) {
                 this.error = error.message;
             }
@@ -54,8 +57,8 @@ function puppyFind() {
         },
 
         async saveSettings(silent = false) {
-            if (!this.form.model_dir || !this.form.image_dir) {
-                this.error = '请先填写模型目录和图片目录';
+            if (!this.form.db_path || !this.form.model_path || !this.form.host || !this.form.port || !this.form.asset_dir) {
+                this.error = '请先填写数据库文件位置、MODEL_PATH、HOST、PORT 和素材目录';
                 return false;
             }
 
@@ -77,13 +80,23 @@ function puppyFind() {
                 if (!response.ok) {
                     throw new Error(data.error || '保存配置失败');
                 }
-                this.form.model_dir = data.model_dir;
-                this.form.image_dir = data.image_dir;
+                this.form.db_path = data.db_path;
+                this.form.model_path = data.model_path;
+                this.form.host = data.host;
+                this.form.port = Number(data.port || 3000);
+                this.form.asset_dir = data.asset_dir;
+                const messages = [];
                 if (data.index_cleared) {
                     this.results = [];
-                    this.message = '配置已保存，旧索引已清空，请重新建索引。';
+                    messages.push('配置已保存，索引上下文已重置，请重新建索引。');
                 } else if (!silent) {
-                    this.message = '配置已保存。';
+                    messages.push('配置已保存。');
+                }
+                if (data.restart_required) {
+                    messages.push('HOST/PORT 已写入 .env，重启程序后生效。');
+                }
+                if (messages.length) {
+                    this.message = messages.join(' ');
                 }
                 if (!silent) {
                     this.showSettings = false;

@@ -1,4 +1,5 @@
 mod app_state;
+mod config;
 mod db;
 mod indexer;
 mod model;
@@ -19,20 +20,20 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let workspace_dir = std::env::current_dir().context("failed to read current directory")?;
-    let db_path = workspace_dir.join("puppy_find.sqlite3");
+    let settings = config::load_or_create(&workspace_dir)?;
+    let db_path = config::resolve_path(&workspace_dir, &settings.db_path);
 
     db::init(&db_path)?;
-    let settings = db::load_settings(&db_path)?.unwrap_or_default();
-    let state = AppState::new(db_path, settings);
+    let state = AppState::new(workspace_dir, settings.clone());
 
     let app = web::router(state);
-    let listener = TcpListener::bind("127.0.0.1:0")
+    let listener = TcpListener::bind((settings.host.as_str(), settings.port))
         .await
         .context("failed to bind HTTP listener")?;
     let address = listener
         .local_addr()
         .context("failed to read listener address")?;
-    let base_url = format!("http://{}", format_socket_address(address));
+    let base_url = browser_base_url(&settings, address);
 
     info!("PuppyFind listening on {base_url}");
 
@@ -63,9 +64,18 @@ fn init_tracing() {
         .init();
 }
 
-fn format_socket_address(address: SocketAddr) -> String {
-    match address {
-        SocketAddr::V4(_) => address.to_string(),
-        SocketAddr::V6(v6) => format!("[{}]:{}", v6.ip(), v6.port()),
-    }
+fn browser_base_url(settings: &crate::config::AppSettings, address: SocketAddr) -> String {
+    let host = match settings.host.as_str() {
+        "0.0.0.0" => "127.0.0.1".to_owned(),
+        "::" => "::1".to_owned(),
+        other => other.to_owned(),
+    };
+
+    let display_address = if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{}", address.port())
+    } else {
+        format!("{host}:{}", address.port())
+    };
+
+    format!("http://{display_address}")
 }

@@ -85,15 +85,22 @@ pub fn validate_model_dir(path: impl AsRef<Path>) -> Result<String> {
         bail!("{message}");
     }
 
+    ensure_model_loadable(&probe.normalized_path)?;
+
     Ok(path_to_string(&probe.normalized_path))
 }
 
-pub fn validate_image_dir(path: impl AsRef<Path>) -> Result<String> {
-    let normalized = normalize_existing_dir(path.as_ref(), "图片目录")?;
+pub fn validate_asset_dir(path: impl AsRef<Path>) -> Result<String> {
+    let normalized = normalize_dir_path(path.as_ref(), "素材目录")?;
     Ok(path_to_string(&normalized))
 }
 
-pub fn normalize_existing_dir(path: &Path, label: &str) -> Result<PathBuf> {
+pub fn validate_existing_asset_dir(path: impl AsRef<Path>) -> Result<String> {
+    let normalized = normalize_existing_dir(path.as_ref(), "素材目录")?;
+    Ok(path_to_string(&normalized))
+}
+
+pub fn normalize_dir_path(path: &Path, label: &str) -> Result<PathBuf> {
     if path.as_os_str().is_empty() {
         bail!("{label}不能为空");
     }
@@ -106,6 +113,12 @@ pub fn normalize_existing_dir(path: &Path, label: &str) -> Result<PathBuf> {
             .join(path)
     };
 
+    Ok(absolute)
+}
+
+pub fn normalize_existing_dir(path: &Path, label: &str) -> Result<PathBuf> {
+    let absolute = normalize_dir_path(path, label)?;
+
     let metadata = fs::metadata(&absolute)
         .with_context(|| format!("{label}不存在: {}", absolute.display()))?;
     if !metadata.is_dir() {
@@ -117,4 +130,13 @@ pub fn normalize_existing_dir(path: &Path, label: &str) -> Result<PathBuf> {
 
 pub fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+fn ensure_model_loadable(model_dir: &Path) -> Result<()> {
+    let mut builder = OmniSearch::builder();
+    builder.from_local_model_dir(model_dir);
+    builder
+        .build()
+        .with_context(|| format!("failed to load model bundle from {}", model_dir.display()))?;
+    Ok(())
 }

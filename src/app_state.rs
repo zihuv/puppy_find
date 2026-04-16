@@ -3,12 +3,12 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
-use crate::db::AppSettings;
+use crate::config::{self, AppSettings};
 use crate::model::ModelManager;
 
 #[derive(Clone)]
 pub struct AppState {
-    db_path: Arc<PathBuf>,
+    workspace_dir: Arc<PathBuf>,
     settings: Arc<Mutex<AppSettings>>,
     index_status: Arc<Mutex<IndexStatus>>,
     model_manager: ModelManager,
@@ -24,17 +24,22 @@ pub struct IndexStatus {
 }
 
 impl AppState {
-    pub fn new(db_path: PathBuf, settings: AppSettings) -> Self {
+    pub fn new(workspace_dir: PathBuf, settings: AppSettings) -> Self {
         Self {
-            db_path: Arc::new(db_path),
+            workspace_dir: Arc::new(workspace_dir),
             settings: Arc::new(Mutex::new(settings)),
             index_status: Arc::new(Mutex::new(IndexStatus::default())),
             model_manager: ModelManager::default(),
         }
     }
 
-    pub fn db_path(&self) -> &Path {
-        self.db_path.as_ref().as_path()
+    pub fn workspace_dir(&self) -> &Path {
+        self.workspace_dir.as_ref().as_path()
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        let settings = self.settings();
+        config::resolve_path(self.workspace_dir(), &settings.db_path)
     }
 
     pub fn settings(&self) -> AppSettings {

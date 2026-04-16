@@ -29,11 +29,12 @@ pub fn spawn_indexing(state: AppState) -> JoinHandle<()> {
 
 fn run_indexing(state: &AppState) -> Result<()> {
     let settings = state.settings();
-    let model_dir = PathBuf::from(&settings.model_dir);
-    let image_dir = PathBuf::from(&settings.image_dir);
+    let db_path = state.db_path();
+    let model_dir = PathBuf::from(&settings.model_path);
+    let image_dir = PathBuf::from(&settings.asset_dir);
 
     let files = collect_image_files(&image_dir)?;
-    let existing = db::list_indexed_images(state.db_path())?;
+    let existing = db::list_indexed_images(&db_path)?;
 
     state.update_index_status(|status| {
         status.total = files.len();
@@ -69,7 +70,7 @@ fn run_indexing(state: &AppState) -> Result<()> {
                         dims: vector.len(),
                         vector,
                     };
-                    db::upsert_image(state.db_path(), &record)?;
+                    db::upsert_image(&db_path, &record)?;
                 }
                 Err(error) => {
                     error!("skipping {}: {error:#}", file.path.display());
@@ -83,7 +84,7 @@ fn run_indexing(state: &AppState) -> Result<()> {
     }
 
     let removed_paths = collect_removed_paths(existing, &keep_paths);
-    db::delete_images_by_paths(state.db_path(), &removed_paths)?;
+    db::delete_images_by_paths(&db_path, &removed_paths)?;
 
     Ok(())
 }
@@ -99,9 +100,10 @@ fn collect_removed_paths(
 }
 
 fn collect_image_files(image_dir: &Path) -> Result<Vec<FileEntry>> {
+    let image_dir = crate::model::normalize_existing_dir(image_dir, "素材目录")?;
     let mut files = Vec::new();
 
-    for entry in WalkDir::new(image_dir)
+    for entry in WalkDir::new(&image_dir)
         .follow_links(false)
         .into_iter()
         .filter_map(|entry| entry.ok())
