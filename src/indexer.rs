@@ -30,7 +30,6 @@ pub fn spawn_indexing(state: AppState) -> JoinHandle<()> {
 fn run_indexing(state: &AppState) -> Result<()> {
     let settings = state.settings();
     let db_path = state.db_path();
-    let model_dir = PathBuf::from(&settings.model_path);
     let image_dir = PathBuf::from(&settings.asset_dir);
 
     let files = collect_image_files(&image_dir)?;
@@ -59,7 +58,7 @@ fn run_indexing(state: &AppState) -> Result<()> {
         if !unchanged {
             match state
                 .model_manager()
-                .embed_image_path(&model_dir, &file.path)
+                .embed_image_path(&settings, &file.path)
             {
                 Ok(vector) => {
                     let record = NewImageRecord {

@@ -3,6 +3,8 @@ function puppyFind() {
         form: {
             db_path: '',
             model_path: '',
+            omni_intra_threads: 4,
+            omni_fgclip_max_patches: 256,
             host: '127.0.0.1',
             port: 3000,
             asset_dir: ''
@@ -37,6 +39,8 @@ function puppyFind() {
                 const data = await this.parseJson(response);
                 this.form.db_path = data.db_path || '';
                 this.form.model_path = data.model_path || '';
+                this.form.omni_intra_threads = Number(data.omni_intra_threads || 4);
+                this.form.omni_fgclip_max_patches = Number(data.omni_fgclip_max_patches || 256);
                 this.form.host = data.host || '127.0.0.1';
                 this.form.port = Number(data.port || 3000);
                 this.form.asset_dir = data.asset_dir || '';
@@ -57,8 +61,8 @@ function puppyFind() {
         },
 
         async saveSettings(silent = false) {
-            if (!this.form.db_path || !this.form.model_path || !this.form.host || !this.form.port || !this.form.asset_dir) {
-                this.error = '请先填写数据库文件位置、MODEL_PATH、HOST、PORT 和素材目录';
+            if (!this.form.db_path || !this.form.model_path || !this.form.omni_intra_threads || !this.form.omni_fgclip_max_patches || !this.form.host || !this.form.port || !this.form.asset_dir) {
+                this.error = '请先填写数据库文件位置、MODEL_PATH、OMNI_INTRA_THREADS、OMNI_FGCLIP_MAX_PATCHES、HOST、PORT 和素材目录';
                 return false;
             }
 
@@ -82,6 +86,8 @@ function puppyFind() {
                 }
                 this.form.db_path = data.db_path;
                 this.form.model_path = data.model_path;
+                this.form.omni_intra_threads = Number(data.omni_intra_threads || 4);
+                this.form.omni_fgclip_max_patches = Number(data.omni_fgclip_max_patches || 256);
                 this.form.host = data.host;
                 this.form.port = Number(data.port || 3000);
                 this.form.asset_dir = data.asset_dir;

@@ -10,18 +10,33 @@ const ENV_FILE_NAME: &str = ".env";
 const KEY_DB_PATH: &str = "DB_PATH";
 const KEY_MODEL_PATH: &str = "MODEL_PATH";
 const KEY_MODEL_DIR_LEGACY: &str = "MODEL_DIR";
+const KEY_OMNI_INTRA_THREADS: &str = "OMNI_INTRA_THREADS";
+const KEY_OMNI_FGCLIP_MAX_PATCHES: &str = "OMNI_FGCLIP_MAX_PATCHES";
 const KEY_HOST: &str = "HOST";
 const KEY_PORT: &str = "PORT";
 const KEY_ASSET_DIR: &str = "ASSET_DIR";
 const KEY_IMAGE_DIR_LEGACY: &str = "IMAGE_DIR";
+const SUPPORTED_FGCLIP_MAX_PATCHES: [usize; 5] = [128, 256, 576, 784, 1024];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppSettings {
     pub db_path: String,
     pub model_path: String,
+    #[serde(default = "default_omni_intra_threads")]
+    pub omni_intra_threads: usize,
+    #[serde(default = "default_omni_fgclip_max_patches")]
+    pub omni_fgclip_max_patches: usize,
     pub host: String,
     pub port: u16,
     pub asset_dir: String,
+}
+
+fn default_omni_intra_threads() -> usize {
+    4
+}
+
+fn default_omni_fgclip_max_patches() -> usize {
+    256
 }
 
 impl Default for AppSettings {
@@ -35,6 +50,8 @@ impl AppSettings {
         Self {
             db_path: "./puppy_find.db".to_owned(),
             model_path: "./models/chinese_clip_bundle".to_owned(),
+            omni_intra_threads: default_omni_intra_threads(),
+            omni_fgclip_max_patches: default_omni_fgclip_max_patches(),
             host: "127.0.0.1".to_owned(),
             port: 3000,
             asset_dir: "./materials".to_owned(),
@@ -69,6 +86,16 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
             .cloned()
             .or_else(|| parsed.get(KEY_MODEL_DIR_LEGACY).cloned())
             .unwrap_or_else(|| defaults.model_path.clone()),
+        omni_intra_threads: parsed
+            .get(KEY_OMNI_INTRA_THREADS)
+            .and_then(|value| value.parse::<usize>().ok())
+            .and_then(|value| validate_omni_intra_threads(value).ok())
+            .unwrap_or(defaults.omni_intra_threads),
+        omni_fgclip_max_patches: parsed
+            .get(KEY_OMNI_FGCLIP_MAX_PATCHES)
+            .and_then(|value| value.parse::<usize>().ok())
+            .and_then(|value| validate_omni_fgclip_max_patches(value).ok())
+            .unwrap_or(defaults.omni_fgclip_max_patches),
         host: parsed
             .get(KEY_HOST)
             .map(|value| value.trim())
@@ -89,6 +116,8 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
     let missing_required_keys = [
         KEY_DB_PATH,
         KEY_MODEL_PATH,
+        KEY_OMNI_INTRA_THREADS,
+        KEY_OMNI_FGCLIP_MAX_PATCHES,
         KEY_HOST,
         KEY_PORT,
         KEY_ASSET_DIR,
@@ -103,12 +132,31 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
     let invalid_port = parsed
         .get(KEY_PORT)
         .is_some_and(|value| value.parse::<u16>().is_err());
+    let invalid_omni_intra_threads = parsed.get(KEY_OMNI_INTRA_THREADS).is_some_and(|value| {
+        value
+            .parse::<usize>()
+            .ok()
+            .and_then(|value| validate_omni_intra_threads(value).ok())
+            .is_none()
+    });
+    let invalid_omni_fgclip_max_patches =
+        parsed
+            .get(KEY_OMNI_FGCLIP_MAX_PATCHES)
+            .is_some_and(|value| {
+                value
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|value| validate_omni_fgclip_max_patches(value).ok())
+                    .is_none()
+            });
 
     if existing_text.is_none()
         || missing_required_keys
         || used_legacy_keys
         || invalid_host
         || invalid_port
+        || invalid_omni_intra_threads
+        || invalid_omni_fgclip_max_patches
     {
         save(workspace_dir, &settings)?;
     }
@@ -175,6 +223,20 @@ pub fn validate_host(value: &str) -> Result<String> {
     Ok(trimmed.to_owned())
 }
 
+pub fn validate_omni_intra_threads(value: usize) -> Result<usize> {
+    if value == 0 {
+        bail!("OMNI_INTRA_THREADS 必须大于 0");
+    }
+    Ok(value)
+}
+
+pub fn validate_omni_fgclip_max_patches(value: usize) -> Result<usize> {
+    if !SUPPORTED_FGCLIP_MAX_PATCHES.contains(&value) {
+        bail!("OMNI_FGCLIP_MAX_PATCHES 必须是 128、256、576、784 或 1024");
+    }
+    Ok(value)
+}
+
 pub fn needs_setup(settings: &AppSettings) -> bool {
     settings.model_path.trim().is_empty() || settings.asset_dir.trim().is_empty()
 }
@@ -225,6 +287,8 @@ fn render_env_file(existing_text: &str, settings: &AppSettings) -> String {
     for key in [
         KEY_DB_PATH,
         KEY_MODEL_PATH,
+        KEY_OMNI_INTRA_THREADS,
+        KEY_OMNI_FGCLIP_MAX_PATCHES,
         KEY_HOST,
         KEY_PORT,
         KEY_ASSET_DIR,
@@ -245,6 +309,14 @@ fn render_known_line(key: &str, settings: &AppSettings) -> Option<String> {
         KEY_MODEL_PATH => Some(render_string_assignment(
             KEY_MODEL_PATH,
             &settings.model_path,
+        )),
+        KEY_OMNI_INTRA_THREADS => Some(format!(
+            "{KEY_OMNI_INTRA_THREADS}={}",
+            settings.omni_intra_threads
+        )),
+        KEY_OMNI_FGCLIP_MAX_PATCHES => Some(format!(
+            "{KEY_OMNI_FGCLIP_MAX_PATCHES}={}",
+            settings.omni_fgclip_max_patches
         )),
         KEY_HOST => Some(render_string_assignment(KEY_HOST, &settings.host)),
         KEY_PORT => Some(format!("{KEY_PORT}={}", settings.port)),

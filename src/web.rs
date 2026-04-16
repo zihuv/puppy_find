@@ -49,6 +49,8 @@ async fn get_settings(State(state): State<Arc<AppState>>) -> Json<SettingsView> 
     Json(SettingsView {
         db_path: settings.db_path,
         model_path: settings.model_path,
+        omni_intra_threads: settings.omni_intra_threads,
+        omni_fgclip_max_patches: settings.omni_fgclip_max_patches,
         host: settings.host,
         port: settings.port,
         asset_dir: settings.asset_dir,
@@ -68,14 +70,25 @@ async fn save_settings(
 
     let db_path = config::validate_db_path(state.workspace_dir(), &payload.db_path)
         .map_err(ApiError::bad_request)?;
-    let model_path =
-        model::validate_model_dir(&payload.model_path).map_err(ApiError::bad_request)?;
+    let omni_intra_threads = config::validate_omni_intra_threads(payload.omni_intra_threads)
+        .map_err(ApiError::bad_request)?;
+    let omni_fgclip_max_patches =
+        config::validate_omni_fgclip_max_patches(payload.omni_fgclip_max_patches)
+            .map_err(ApiError::bad_request)?;
+    let model_path = model::validate_model_dir(
+        &payload.model_path,
+        omni_intra_threads,
+        omni_fgclip_max_patches,
+    )
+    .map_err(ApiError::bad_request)?;
     let asset_dir = model::validate_asset_dir(&payload.asset_dir).map_err(ApiError::bad_request)?;
     let host = config::validate_host(&payload.host).map_err(ApiError::bad_request)?;
 
     let new_settings = AppSettings {
         db_path,
         model_path,
+        omni_intra_threads,
+        omni_fgclip_max_patches,
         host,
         port: payload.port,
         asset_dir,
@@ -87,6 +100,8 @@ async fn save_settings(
         || old_settings.asset_dir != new_settings.asset_dir;
     let should_clear_images = old_settings.model_path != new_settings.model_path
         || old_settings.asset_dir != new_settings.asset_dir;
+    let runtime_changed = old_settings.omni_intra_threads != new_settings.omni_intra_threads
+        || old_settings.omni_fgclip_max_patches != new_settings.omni_fgclip_max_patches;
     let restart_required =
         old_settings.host != new_settings.host || old_settings.port != new_settings.port;
     let active_db_path = config::resolve_path(state.workspace_dir(), &new_settings.db_path);
@@ -99,8 +114,11 @@ async fn save_settings(
         db::clear_images(&active_db_path).map_err(ApiError::internal)?;
     }
 
-    if index_data_changed {
+    if index_data_changed || runtime_changed {
         state.model_manager().clear();
+    }
+
+    if index_data_changed {
         state.update_index_status(|status| {
             status.total = 0;
             status.processed = 0;
@@ -115,6 +133,8 @@ async fn save_settings(
     Ok(Json(SettingsResponse {
         db_path: new_settings.db_path,
         model_path: new_settings.model_path,
+        omni_intra_threads: new_settings.omni_intra_threads,
+        omni_fgclip_max_patches: new_settings.omni_fgclip_max_patches,
         host: new_settings.host,
         port: new_settings.port,
         asset_dir: new_settings.asset_dir,
@@ -131,7 +151,12 @@ async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResp
         )));
     }
 
-    model::validate_model_dir(&settings.model_path).map_err(ApiError::bad_request)?;
+    model::validate_model_dir(
+        &settings.model_path,
+        settings.omni_intra_threads,
+        settings.omni_fgclip_max_patches,
+    )
+    .map_err(ApiError::bad_request)?;
     model::validate_existing_asset_dir(&settings.asset_dir).map_err(ApiError::bad_request)?;
 
     if !state.try_start_indexing() {
@@ -243,6 +268,8 @@ struct MessageResponse {
 struct SettingsResponse {
     db_path: String,
     model_path: String,
+    omni_intra_threads: usize,
+    omni_fgclip_max_patches: usize,
     host: String,
     port: u16,
     asset_dir: String,
@@ -254,6 +281,8 @@ struct SettingsResponse {
 struct SettingsView {
     db_path: String,
     model_path: String,
+    omni_intra_threads: usize,
+    omni_fgclip_max_patches: usize,
     host: String,
     port: u16,
     asset_dir: String,

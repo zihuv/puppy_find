@@ -21,9 +21,7 @@ pub fn run_search(state: &AppState, query: &str, limit: usize) -> Result<Vec<Sea
     }
 
     let db_path = state.db_path();
-    let query_vector = state
-        .model_manager()
-        .embed_text(settings.model_path.as_ref(), query)?;
+    let query_vector = state.model_manager().embed_text(&settings, query)?;
     let images = db::list_search_images(&db_path)?;
 
     if images.is_empty() {
