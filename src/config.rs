@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -183,19 +183,22 @@ pub fn save(workspace_dir: &Path, settings: &AppSettings) -> Result<()> {
 
 pub fn resolve_path(workspace_dir: &Path, value: &str) -> PathBuf {
     let path = Path::new(value);
-    if path.is_absolute() {
+    let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         workspace_dir.join(path)
-    }
+    };
+
+    normalize_path_lexically(&absolute)
 }
 
 pub fn validate_db_path(workspace_dir: &Path, value: &str) -> Result<String> {
-    if value.trim().is_empty() {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
         bail!("数据库文件位置不能为空");
     }
 
-    let path = resolve_path(workspace_dir, value);
+    let path = resolve_path(workspace_dir, trimmed);
     if path.is_dir() {
         bail!("数据库文件位置不能是目录: {}", path.display());
     }
@@ -209,7 +212,7 @@ pub fn validate_db_path(workspace_dir: &Path, value: &str) -> Result<String> {
         }
     }
 
-    Ok(crate::model::path_to_string(&path))
+    Ok(trimmed.to_owned())
 }
 
 pub fn validate_host(value: &str) -> Result<String> {
@@ -243,6 +246,24 @@ pub fn needs_setup(settings: &AppSettings) -> bool {
 
 fn env_path(workspace_dir: &Path) -> PathBuf {
     workspace_dir.join(ENV_FILE_NAME)
+}
+
+fn normalize_path_lexically(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+
+    normalized
 }
 
 fn render_env_file(existing_text: &str, settings: &AppSettings) -> String {
@@ -402,4 +423,43 @@ fn unescape_quoted_value(value: &str) -> String {
     }
 
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{resolve_path, validate_db_path};
+
+    #[test]
+    fn resolve_path_normalizes_relative_segments() {
+        let workspace_dir = PathBuf::from("D:/code/puppy_find");
+
+        let left = resolve_path(&workspace_dir, "./materials");
+        let right = resolve_path(&workspace_dir, "materials");
+
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn validate_db_path_preserves_relative_input() {
+        let workspace_dir = unique_test_dir();
+        fs::create_dir_all(&workspace_dir).unwrap();
+
+        let validated = validate_db_path(&workspace_dir, "./data/app.db").unwrap();
+
+        assert_eq!(validated, "./data/app.db");
+
+        let _ = fs::remove_dir_all(&workspace_dir);
+    }
+
+    fn unique_test_dir() -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("puppy_find_config_test_{timestamp}"))
+    }
 }

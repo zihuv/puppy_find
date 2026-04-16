@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 use walkdir::WalkDir;
@@ -30,7 +30,7 @@ pub fn spawn_indexing(state: AppState) -> JoinHandle<()> {
 fn run_indexing(state: &AppState) -> Result<()> {
     let settings = state.settings();
     let db_path = state.db_path();
-    let image_dir = PathBuf::from(&settings.asset_dir);
+    let image_dir = crate::config::resolve_path(state.workspace_dir(), &settings.asset_dir);
 
     let files = collect_image_files(&image_dir)?;
     let existing = db::list_indexed_images(&db_path)?;
@@ -56,10 +56,11 @@ fn run_indexing(state: &AppState) -> Result<()> {
         });
 
         if !unchanged {
-            match state
-                .model_manager()
-                .embed_image_path(&settings, &file.path)
-            {
+            match state.model_manager().embed_image_path(
+                state.workspace_dir(),
+                &settings,
+                &file.path,
+            ) {
                 Ok(vector) => {
                     let record = NewImageRecord {
                         path: path_string.clone(),
@@ -99,10 +100,15 @@ fn collect_removed_paths(
 }
 
 fn collect_image_files(image_dir: &Path) -> Result<Vec<FileEntry>> {
-    let image_dir = crate::model::normalize_existing_dir(image_dir, "素材目录")?;
+    let metadata = fs::metadata(image_dir)
+        .with_context(|| format!("素材目录不存在: {}", image_dir.display()))?;
+    if !metadata.is_dir() {
+        bail!("素材目录不是目录: {}", image_dir.display());
+    }
+
     let mut files = Vec::new();
 
-    for entry in WalkDir::new(&image_dir)
+    for entry in WalkDir::new(image_dir)
         .follow_links(false)
         .into_iter()
         .filter_map(|entry| entry.ok())

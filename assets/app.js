@@ -1,7 +1,6 @@
 function puppyFind() {
     return {
         form: {
-            db_path: '',
             model_path: '',
             omni_intra_threads: 4,
             omni_fgclip_max_patches: 256,
@@ -37,7 +36,6 @@ function puppyFind() {
             try {
                 const response = await fetch('/api/settings');
                 const data = await this.parseJson(response);
-                this.form.db_path = data.db_path || '';
                 this.form.model_path = data.model_path || '';
                 this.form.omni_intra_threads = Number(data.omni_intra_threads || 4);
                 this.form.omni_fgclip_max_patches = Number(data.omni_fgclip_max_patches || 256);
@@ -61,8 +59,8 @@ function puppyFind() {
         },
 
         async saveSettings(silent = false) {
-            if (!this.form.db_path || !this.form.model_path || !this.form.omni_intra_threads || !this.form.omni_fgclip_max_patches || !this.form.host || !this.form.port || !this.form.asset_dir) {
-                this.error = '请先填写数据库文件位置、MODEL_PATH、OMNI_INTRA_THREADS、OMNI_FGCLIP_MAX_PATCHES、HOST、PORT 和素材目录';
+            if (!this.form.model_path || !this.form.omni_intra_threads || !this.form.omni_fgclip_max_patches || !this.form.host || !this.form.port || !this.form.asset_dir) {
+                this.error = '请先填写 MODEL_PATH、OMNI_INTRA_THREADS、OMNI_FGCLIP_MAX_PATCHES、HOST、PORT 和素材目录';
                 return false;
             }
 
@@ -84,7 +82,6 @@ function puppyFind() {
                 if (!response.ok) {
                     throw new Error(data.error || '保存配置失败');
                 }
-                this.form.db_path = data.db_path;
                 this.form.model_path = data.model_path;
                 this.form.omni_intra_threads = Number(data.omni_intra_threads || 4);
                 this.form.omni_fgclip_max_patches = Number(data.omni_fgclip_max_patches || 256);

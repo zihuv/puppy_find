@@ -26,8 +26,13 @@ struct ModelCacheKey {
 }
 
 impl ModelManager {
-    pub fn embed_text(&self, settings: &AppSettings, text: &str) -> Result<Vec<f32>> {
-        self.with_model(settings, |model| {
+    pub fn embed_text(
+        &self,
+        workspace_dir: &Path,
+        settings: &AppSettings,
+        text: &str,
+    ) -> Result<Vec<f32>> {
+        self.with_model(workspace_dir, settings, |model| {
             model
                 .embed_text(text)
                 .map(|embedding| embedding.as_slice().to_vec())
@@ -35,8 +40,13 @@ impl ModelManager {
         })
     }
 
-    pub fn embed_image_path(&self, settings: &AppSettings, image_path: &Path) -> Result<Vec<f32>> {
-        self.with_model(settings, |model| {
+    pub fn embed_image_path(
+        &self,
+        workspace_dir: &Path,
+        settings: &AppSettings,
+        image_path: &Path,
+    ) -> Result<Vec<f32>> {
+        self.with_model(workspace_dir, settings, |model| {
             model
                 .embed_image_path(image_path)
                 .map(|embedding| embedding.as_slice().to_vec())
@@ -55,6 +65,7 @@ impl ModelManager {
 
     fn with_model<T>(
         &self,
+        workspace_dir: &Path,
         settings: &AppSettings,
         f: impl FnOnce(&OmniSearch) -> Result<T>,
     ) -> Result<T> {
@@ -62,7 +73,8 @@ impl ModelManager {
             .inner
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let normalized = normalize_existing_dir(Path::new(&settings.model_path), "模型目录")?;
+        let normalized =
+            normalize_existing_dir(workspace_dir, Path::new(&settings.model_path), "模型目录")?;
         let model_key = ModelCacheKey {
             model_dir: normalized.clone(),
             omni_intra_threads: settings.omni_intra_threads,
@@ -90,11 +102,13 @@ impl ModelManager {
 }
 
 pub fn validate_model_dir(
-    path: impl AsRef<Path>,
+    workspace_dir: &Path,
+    value: &str,
     omni_intra_threads: usize,
     omni_fgclip_max_patches: usize,
 ) -> Result<String> {
-    let normalized = normalize_existing_dir(path.as_ref(), "模型目录")?;
+    let trimmed = trim_path_input(value, "模型目录")?;
+    let normalized = normalize_existing_dir(workspace_dir, Path::new(trimmed), "模型目录")?;
     let probe = probe_local_model_dir(&normalized);
 
     if !probe.ok {
@@ -110,20 +124,22 @@ pub fn validate_model_dir(
         omni_fgclip_max_patches,
     )?;
 
-    Ok(path_to_string(&probe.normalized_path))
+    Ok(trimmed.to_owned())
 }
 
-pub fn validate_asset_dir(path: impl AsRef<Path>) -> Result<String> {
-    let normalized = normalize_dir_path(path.as_ref(), "素材目录")?;
-    Ok(path_to_string(&normalized))
+pub fn validate_asset_dir(workspace_dir: &Path, value: &str) -> Result<String> {
+    let trimmed = trim_path_input(value, "素材目录")?;
+    normalize_dir_path(workspace_dir, Path::new(trimmed), "素材目录")?;
+    Ok(trimmed.to_owned())
 }
 
-pub fn validate_existing_asset_dir(path: impl AsRef<Path>) -> Result<String> {
-    let normalized = normalize_existing_dir(path.as_ref(), "素材目录")?;
-    Ok(path_to_string(&normalized))
+pub fn validate_existing_asset_dir(workspace_dir: &Path, value: &str) -> Result<String> {
+    let trimmed = trim_path_input(value, "素材目录")?;
+    normalize_existing_dir(workspace_dir, Path::new(trimmed), "素材目录")?;
+    Ok(trimmed.to_owned())
 }
 
-pub fn normalize_dir_path(path: &Path, label: &str) -> Result<PathBuf> {
+pub fn normalize_dir_path(workspace_dir: &Path, path: &Path, label: &str) -> Result<PathBuf> {
     if path.as_os_str().is_empty() {
         bail!("{label}不能为空");
     }
@@ -131,16 +147,17 @@ pub fn normalize_dir_path(path: &Path, label: &str) -> Result<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        std::env::current_dir()
-            .context("failed to read current directory")?
-            .join(path)
+        workspace_dir.join(path)
     };
 
-    Ok(absolute)
+    Ok(crate::config::resolve_path(
+        workspace_dir,
+        &absolute.to_string_lossy(),
+    ))
 }
 
-pub fn normalize_existing_dir(path: &Path, label: &str) -> Result<PathBuf> {
-    let absolute = normalize_dir_path(path, label)?;
+pub fn normalize_existing_dir(workspace_dir: &Path, path: &Path, label: &str) -> Result<PathBuf> {
+    let absolute = normalize_dir_path(workspace_dir, path, label)?;
 
     let metadata = fs::metadata(&absolute)
         .with_context(|| format!("{label}不存在: {}", absolute.display()))?;
@@ -153,6 +170,14 @@ pub fn normalize_existing_dir(path: &Path, label: &str) -> Result<PathBuf> {
 
 pub fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+fn trim_path_input<'a>(value: &'a str, label: &str) -> Result<&'a str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("{label}不能为空");
+    }
+    Ok(trimmed)
 }
 
 fn apply_runtime_settings(builder: &mut OmniSearchBuilder, settings: &AppSettings) {

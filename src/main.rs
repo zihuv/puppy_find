@@ -21,7 +21,8 @@ async fn main() -> anyhow::Result<()> {
 
     let workspace_dir = std::env::current_dir().context("failed to read current directory")?;
     let settings = config::load_or_create(&workspace_dir)?;
-    let db_path = config::resolve_path(&workspace_dir, &settings.db_path);
+    let db_path_value = config::validate_db_path(&workspace_dir, &settings.db_path)?;
+    let db_path = config::resolve_path(&workspace_dir, &db_path_value);
 
     db::init(&db_path)?;
     let state = AppState::new(workspace_dir, settings.clone());
