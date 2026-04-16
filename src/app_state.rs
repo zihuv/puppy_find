@@ -31,6 +31,8 @@ impl AppState {
             settings: Arc::new(Mutex::new(settings)),
             index_status: Arc::new(Mutex::new(IndexStatus {
                 indexed,
+                total: indexed,
+                processed: indexed,
                 ..IndexStatus::default()
             })),
             model_manager: ModelManager::default(),
@@ -79,7 +81,7 @@ impl AppState {
         update(&mut status);
     }
 
-    pub fn try_start_indexing(&self) -> bool {
+    pub fn try_start_indexing(&self, total: usize) -> bool {
         let mut status = self
             .index_status
             .lock()
@@ -92,7 +94,7 @@ impl AppState {
         *status = IndexStatus {
             running: true,
             indexed,
-            total: 0,
+            total,
             processed: 0,
             current_file: None,
             error: None,

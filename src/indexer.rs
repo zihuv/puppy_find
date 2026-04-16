@@ -93,6 +93,27 @@ fn run_indexing(state: &AppState) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn count_indexable_images(image_dir: &Path) -> Result<usize> {
+    let metadata = fs::metadata(image_dir)
+        .with_context(|| format!("素材目录不存在: {}", image_dir.display()))?;
+    if !metadata.is_dir() {
+        bail!("素材目录不是目录: {}", image_dir.display());
+    }
+
+    let mut count = 0;
+    for entry in WalkDir::new(image_dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+    {
+        if entry.file_type().is_file() && is_supported_image(entry.path()) {
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}
+
 fn collect_removed_paths(
     existing: HashMap<String, IndexedImageSnapshot>,
     keep_paths: &HashSet<String>,

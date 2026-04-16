@@ -121,8 +121,6 @@ function puppyFind() {
                 if (!response.ok) {
                     throw new Error(data.error || data.message || '启动索引失败');
                 }
-                this.message = data.message;
-                this.showSettings = false;
                 await this.fetchIndexStatus();
             } catch (error) {
                 this.error = error.message;
@@ -173,6 +171,16 @@ function puppyFind() {
             } finally {
                 this.searching = false;
             }
+        },
+
+        scanProgressText() {
+            if (this.indexStatus.running || this.indexStatus.total > 0) {
+                return `${this.indexStatus.processed}/${this.indexStatus.total}`;
+            }
+            if (this.indexStatus.indexed > 0) {
+                return `${this.indexStatus.processed || this.indexStatus.indexed}/${this.indexStatus.total || this.indexStatus.indexed}`;
+            }
+            return '未开始';
         },
 
         async parseJson(response) {

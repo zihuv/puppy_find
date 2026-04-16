@@ -13,15 +13,23 @@
 <body>
     <div class="page" x-data="puppyFind()" x-init="init()">
         <header class="page-head">
-            <div>
+            <div class="page-brand">
                 <h1>PuppyFind</h1>
-
             </div>
-            <button class="ghost" @click="openSettings()">配置</button>
+            <div class="page-tools">
+                <div class="head-progress">
+                    <span>扫描进度</span>
+                    <strong x-text="scanProgressText()"></strong>
+                </div>
+                <button class="primary" @click="startIndex()" :disabled="indexStatus.running || saving">
+                    <span x-text="indexStatus.running ? '索引中...' : '开始建索引'"></span>
+                </button>
+                <button class="ghost" @click="openSettings()">配置</button>
+            </div>
         </header>
 
-
-
+        <p class="message" x-show="message" x-text="message"></p>
+        <p class="error" x-show="error" x-text="error"></p>
 
         <div class="search-row">
             <input x-model.trim="query" @keydown.enter.prevent="search()" type="text" placeholder="输入关键词，比如：草地上的小狗">
@@ -64,24 +72,9 @@
                     <input x-model.trim="form.asset_dir" type="text" placeholder="./materials">
                 </label>
 
-                <div class="progress compact">
-                    <div>
-                        <span>索引数</span>
-                        <strong x-text="indexStatus.indexed"></strong>
-                    </div>
-                    <div>
-                        <span>扫描进度</span>
-                        <strong
-                            x-text="indexStatus.running || indexStatus.total ? `${indexStatus.processed}/${indexStatus.total}` : '0/0'"></strong>
-                    </div>
-                </div>
-
                 <div class="actions">
                     <button @click="saveSettings()" :disabled="saving || indexStatus.running">
                         <span x-text="saving ? '保存中...' : '保存配置'"></span>
-                    </button>
-                    <button class="primary" @click="startIndex()" :disabled="indexStatus.running || saving">
-                        <span x-text="indexStatus.running ? '索引中...' : '开始建索引'"></span>
                     </button>
                 </div>
             </div>

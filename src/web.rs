@@ -134,11 +134,16 @@ async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResp
         settings.omni_fgclip_max_patches,
     )
     .map_err(ApiError::bad_request)?;
-    model::validate_existing_asset_dir(state.workspace_dir(), &settings.asset_dir)
+    let asset_dir = model::validate_existing_asset_dir(state.workspace_dir(), &settings.asset_dir)
         .map_err(ApiError::bad_request)?;
+    let total = indexer::count_indexable_images(&crate::config::resolve_path(
+        state.workspace_dir(),
+        &asset_dir,
+    ))
+    .map_err(ApiError::bad_request)?;
     let sync = sync_runtime_model_index(state.as_ref(), &settings)?;
 
-    if !state.try_start_indexing() {
+    if !state.try_start_indexing(total) {
         return Ok((
             StatusCode::CONFLICT,
             Json(MessageResponse {
@@ -162,6 +167,9 @@ async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResp
 }
 
 async fn index_status(State(state): State<Arc<AppState>>) -> Json<crate::app_state::IndexStatus> {
+    if !state.index_status().running {
+        refresh_idle_index_status(state.as_ref());
+    }
     Json(state.index_status())
 }
 
@@ -267,6 +275,27 @@ fn sync_runtime_model_index(
     }
 
     Ok(sync)
+}
+
+fn refresh_idle_index_status(state: &AppState) {
+    let settings = state.settings();
+    let indexed = match db::count_images(&state.db_path()) {
+        Ok(indexed) => indexed,
+        Err(_) => return,
+    };
+    let asset_dir = crate::config::resolve_path(state.workspace_dir(), &settings.asset_dir);
+    let total = indexer::count_indexable_images(&asset_dir).unwrap_or(indexed);
+
+    state.update_index_status(|status| {
+        if status.running {
+            return;
+        }
+
+        status.indexed = indexed;
+        status.total = total;
+        status.processed = indexed.min(total);
+        status.current_file = None;
+    });
 }
 
 fn reset_index_status(state: &AppState) {
