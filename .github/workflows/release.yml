@@ -165,7 +165,6 @@ jobs:
         run: cargo build --release --locked
 
       - name: Set up Python
-        if: matrix.include_model
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
@@ -191,23 +190,24 @@ jobs:
 
       - name: Package bundle
         id: package
-        shell: pwsh
+        shell: bash
         run: |
-          $arguments = @{
-            BinaryPath = "./target/release/${{ matrix.binary_name }}"
-            Platform = '${{ matrix.platform }}'
-            PackageId = '${{ matrix.package_id }}'
-            Version = '${{ needs.prepare.outputs.version }}'
-            Flavor = '${{ matrix.flavor }}'
-            OutputDir = './release-artifacts'
-          }
+          command=(
+            python scripts/package-release.py
+            --binary-path "./target/release/${{ matrix.binary_name }}"
+            --platform "${{ matrix.platform }}"
+            --package-id "${{ matrix.package_id }}"
+            --version "${{ needs.prepare.outputs.version }}"
+            --flavor "${{ matrix.flavor }}"
+            --output-dir "./release-artifacts"
+          )
 
-          if ('${{ matrix.include_model }}' -eq 'true') {
-            $arguments.ModelSourceDir = './.model-cache'
-          }
+          if [ "${{ matrix.include_model }}" = "true" ]; then
+            command+=(--model-source-dir "./.model-cache")
+          fi
 
-          $archivePath = & ./scripts/package-release.ps1 @arguments
-          "archive_path=$archivePath" >> $env:GITHUB_OUTPUT
+          archive_path="$("${command[@]}")"
+          printf 'archive_path=%s\n' "$archive_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
