@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+PACKAGE_NAME = "puppy_find"
 
 
 def fail(message: str) -> None:
@@ -28,6 +29,17 @@ def read_cargo_version(cargo_toml: Path) -> str:
     match = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
     if not match:
         fail(f"failed to read version from {cargo_toml}")
+    return match.group(1)
+
+
+def read_lock_version(cargo_lock: Path, package_name: str) -> str:
+    text = cargo_lock.read_text(encoding="utf-8")
+    match = re.search(
+        rf'(?ms)^\[\[package\]\]\nname = "{re.escape(package_name)}"\nversion = "([^"]+)"',
+        text,
+    )
+    if not match:
+        fail(f"failed to read {package_name} version from {cargo_lock}")
     return match.group(1)
 
 
@@ -55,10 +67,15 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     version = normalize_version(sys.argv[1])
     cargo_version = read_cargo_version(repo_root / "Cargo.toml")
+    lock_version = read_lock_version(repo_root / "Cargo.lock", PACKAGE_NAME)
 
     if cargo_version != version:
         fail(
             f"tag version {version} does not match Cargo.toml version {cargo_version}"
+        )
+    if lock_version != version:
+        fail(
+            f"tag version {version} does not match Cargo.lock version {lock_version}"
         )
 
     body = render_body(repo_root / ".github" / "release_template.md", version)

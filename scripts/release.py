@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+PACKAGE_NAME = "puppy_find"
 
 
 def fail(message: str) -> None:
@@ -79,6 +80,30 @@ def write_cargo_version(cargo_toml: Path, version: str) -> None:
     cargo_toml.write_text(updated, encoding="utf-8", newline="\n")
 
 
+def read_lock_version(cargo_lock: Path, package_name: str) -> str:
+    text = cargo_lock.read_text(encoding="utf-8")
+    match = re.search(
+        rf'(?ms)^\[\[package\]\]\nname = "{re.escape(package_name)}"\nversion = "([^"]+)"',
+        text,
+    )
+    if not match:
+        fail(f"failed to read {package_name} version from {cargo_lock}")
+    return match.group(1)
+
+
+def write_lock_version(cargo_lock: Path, package_name: str, version: str) -> None:
+    text = cargo_lock.read_text(encoding="utf-8")
+    updated, count = re.subn(
+        rf'(?ms)^(\[\[package\]\]\nname = "{re.escape(package_name)}"\nversion = )"[^"]+"',
+        rf'\1"{version}"',
+        text,
+        count=1,
+    )
+    if count != 1:
+        fail(f"failed to update {package_name} version in {cargo_lock}")
+    cargo_lock.write_text(updated, encoding="utf-8", newline="\n")
+
+
 def ensure_clean_worktree(repo_root: Path) -> None:
     status = git(repo_root, "status", "--short")
     if status:
@@ -100,8 +125,8 @@ def ensure_upstream_exists(repo_root: Path) -> None:
 
 def print_plan(version: str, no_push: bool) -> None:
     print("Release plan:")
-    print(f"- update Cargo.toml to {version}")
-    print("- git add Cargo.toml")
+    print(f"- update Cargo.toml and Cargo.lock to {version}")
+    print("- git add Cargo.toml Cargo.lock")
     print(f'- git commit -m "{version}"')
     print(f'- git tag -a {version} -m "{version}"')
     if not no_push:
@@ -115,10 +140,16 @@ def main() -> None:
 
     repo_root = Path(__file__).resolve().parents[1]
     cargo_toml = repo_root / "Cargo.toml"
+    cargo_lock = repo_root / "Cargo.lock"
     current_version = read_cargo_version(cargo_toml)
+    lock_version = read_lock_version(cargo_lock, PACKAGE_NAME)
 
     if current_version == version:
         fail(f"version is already {version}")
+    if current_version != lock_version:
+        fail(
+            f"Cargo.toml version {current_version} does not match Cargo.lock version {lock_version}"
+        )
 
     ensure_clean_worktree(repo_root)
     ensure_tag_does_not_exist(repo_root, version)
@@ -130,8 +161,9 @@ def main() -> None:
         return
 
     write_cargo_version(cargo_toml, version)
+    write_lock_version(cargo_lock, PACKAGE_NAME, version)
 
-    git(repo_root, "add", "Cargo.toml")
+    git(repo_root, "add", "Cargo.toml", "Cargo.lock")
     git(repo_root, "commit", "-m", version)
     git(repo_root, "tag", "-a", version, "-m", version)
 
