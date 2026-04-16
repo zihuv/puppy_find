@@ -1,0 +1,248 @@
+name: Release
+
+run-name: Release ${{ inputs.version || github.ref_name }}
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 0.1.1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  MODEL_REPO: zihuv/chinese-clip-vit-base-patch16-onnx
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.prepare_release.outputs.version }}
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Prepare release metadata
+        id: prepare_release
+        run: python scripts/prepare-release.py "${{ inputs.version || github.ref_name }}"
+
+      - name: Create or update draft release
+        id: release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_VERSION: ${{ steps.prepare_release.outputs.version }}
+          RELEASE_BODY: ${{ steps.prepare_release.outputs.body }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const tag = process.env.RELEASE_VERSION;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            let release;
+
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag,
+              });
+              release = existing.data;
+              if (!release.draft) {
+                core.setFailed(`Release ${tag} already exists and is not a draft.`);
+                return;
+              }
+
+              release = (
+                await github.rest.repos.updateRelease({
+                  owner,
+                  repo,
+                  release_id: release.id,
+                  tag_name: tag,
+                  name: tag,
+                  body: process.env.RELEASE_BODY,
+                  draft: true,
+                  prerelease: false,
+                  target_commitish: context.sha,
+                })
+              ).data;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              release = (
+                await github.rest.repos.createRelease({
+                  owner,
+                  repo,
+                  tag_name: tag,
+                  name: tag,
+                  body: process.env.RELEASE_BODY,
+                  draft: true,
+                  prerelease: false,
+                  target_commitish: context.sha,
+                })
+              ).data;
+            }
+
+            core.setOutput("release_id", String(release.id));
+
+  build:
+    name: Build ${{ matrix.package_id }}-${{ matrix.flavor }}
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows
+            package_id: windows-x64
+            binary_name: puppy_find.exe
+            flavor: nomodel
+            include_model: false
+          - runner: windows-latest
+            platform: windows
+            package_id: windows-x64
+            binary_name: puppy_find.exe
+            flavor: model
+            include_model: true
+          - runner: ubuntu-24.04
+            platform: linux
+            package_id: linux-x64
+            binary_name: puppy_find
+            flavor: nomodel
+            include_model: false
+          - runner: ubuntu-24.04
+            platform: linux
+            package_id: linux-x64
+            binary_name: puppy_find
+            flavor: model
+            include_model: true
+          - runner: macos-15-intel
+            platform: macos
+            package_id: macos-x64
+            binary_name: puppy_find
+            flavor: nomodel
+            include_model: false
+          - runner: macos-15-intel
+            platform: macos
+            package_id: macos-x64
+            binary_name: puppy_find
+            flavor: model
+            include_model: true
+          - runner: macos-15
+            platform: macos
+            package_id: macos-arm64
+            binary_name: puppy_find
+            flavor: nomodel
+            include_model: false
+          - runner: macos-15
+            platform: macos
+            package_id: macos-arm64
+            binary_name: puppy_find
+            flavor: model
+            include_model: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        shell: pwsh
+        run: cargo build --release --locked
+
+      - name: Set up Python
+        if: matrix.include_model
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Hugging Face CLI
+        if: matrix.include_model
+        shell: pwsh
+        run: python -m pip install --upgrade huggingface_hub
+
+      - name: Download model bundle
+        if: matrix.include_model
+        shell: pwsh
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_HUB_DOWNLOAD_TIMEOUT: "120"
+        run: |
+          if ($env:HF_TOKEN) {
+            hf download $env:MODEL_REPO --local-dir .model-cache --token $env:HF_TOKEN --quiet
+          }
+          else {
+            hf download $env:MODEL_REPO --local-dir .model-cache --quiet
+          }
+
+      - name: Package bundle
+        id: package
+        shell: pwsh
+        run: |
+          $arguments = @(
+            '-BinaryPath', "./target/release/${{ matrix.binary_name }}",
+            '-Platform', '${{ matrix.platform }}',
+            '-PackageId', '${{ matrix.package_id }}',
+            '-Version', '${{ needs.prepare.outputs.version }}',
+            '-Flavor', '${{ matrix.flavor }}',
+            '-OutputDir', './release-artifacts'
+          )
+
+          if ('${{ matrix.include_model }}' -eq 'true') {
+            $arguments += @('-ModelSourceDir', './.model-cache')
+          }
+
+          $archivePath = & ./scripts/package-release.ps1 @arguments
+          "archive_path=$archivePath" >> $env:GITHUB_OUTPUT
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: ${{ steps.package.outputs.archive_path }}
+
+  publish:
+    name: Publish release
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish draft release
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number("${{ needs.prepare.outputs.release_id }}"),
+              draft: false,
+              prerelease: false,
+            });
