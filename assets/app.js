@@ -95,9 +95,6 @@ function puppyFind() {
                 if (messages.length) {
                     this.message = messages.join(' ');
                 }
-                if (!silent) {
-                    this.showSettings = false;
-                }
                 return true;
             } catch (error) {
                 this.error = error.message;
