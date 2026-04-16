@@ -85,6 +85,10 @@ fn run_indexing(state: &AppState) -> Result<()> {
 
     let removed_paths = collect_removed_paths(existing, &keep_paths);
     db::delete_images_by_paths(&db_path, &removed_paths)?;
+    let indexed = db::count_images(&db_path)?;
+    state.update_index_status(|status| {
+        status.indexed = indexed;
+    });
 
     Ok(())
 }

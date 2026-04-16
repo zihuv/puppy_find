@@ -25,7 +25,13 @@ async fn main() -> anyhow::Result<()> {
     let db_path = config::resolve_path(&workspace_dir, &db_path_value);
 
     db::init(&db_path)?;
-    let state = AppState::new(workspace_dir, settings.clone());
+    let model_signature = model::index_model_signature(&workspace_dir, &settings)?;
+    let sync = db::sync_index_model_signature(&db_path, model_signature.as_deref())?;
+    if sync.index_cleared {
+        info!("detected model change on startup, cleared stale image vectors");
+    }
+    let indexed = db::count_images(&db_path)?;
+    let state = AppState::new(workspace_dir, settings.clone(), indexed);
 
     let app = web::router(state);
     let listener = TcpListener::bind((settings.host.as_str(), settings.port))

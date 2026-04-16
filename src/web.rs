@@ -88,6 +88,8 @@ async fn save_settings(
     let new_model_path = resolved_path_key(workspace_dir, &new_settings.model_path);
     let old_asset_dir = resolved_path_key(workspace_dir, &old_settings.asset_dir);
     let new_asset_dir = resolved_path_key(workspace_dir, &new_settings.asset_dir);
+    let new_model_signature =
+        model::index_model_signature(workspace_dir, &new_settings).map_err(ApiError::internal)?;
 
     let index_data_changed = old_model_path != new_model_path || old_asset_dir != new_asset_dir;
     let should_clear_images = old_model_path != new_model_path || old_asset_dir != new_asset_dir;
@@ -95,6 +97,8 @@ async fn save_settings(
 
     if should_clear_images {
         db::clear_images(&active_db_path).map_err(ApiError::internal)?;
+        db::set_index_model_signature(&active_db_path, new_model_signature.as_deref())
+            .map_err(ApiError::internal)?;
     }
 
     if index_data_changed {
@@ -102,12 +106,7 @@ async fn save_settings(
     }
 
     if index_data_changed {
-        state.update_index_status(|status| {
-            status.total = 0;
-            status.processed = 0;
-            status.current_file = None;
-            status.error = None;
-        });
+        reset_index_status(state.as_ref());
     }
 
     config::save(state.workspace_dir(), &new_settings).map_err(ApiError::internal)?;
@@ -137,6 +136,7 @@ async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResp
     .map_err(ApiError::bad_request)?;
     model::validate_existing_asset_dir(state.workspace_dir(), &settings.asset_dir)
         .map_err(ApiError::bad_request)?;
+    let sync = sync_runtime_model_index(state.as_ref(), &settings)?;
 
     if !state.try_start_indexing() {
         return Ok((
@@ -152,7 +152,11 @@ async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResp
     Ok((
         StatusCode::ACCEPTED,
         Json(MessageResponse {
-            message: "索引任务已启动".to_owned(),
+            message: if sync.index_cleared {
+                "检测到模型已变更，已清空旧索引并启动重建".to_owned()
+            } else {
+                "索引任务已启动".to_owned()
+            },
         }),
     ))
 }
@@ -171,6 +175,14 @@ async fn search_images(
     }
 
     let limit = payload.limit.unwrap_or(60).clamp(1, 200);
+    let settings = state.settings();
+    let sync = sync_runtime_model_index(state.as_ref(), &settings)?;
+    if sync.index_cleared {
+        return Err(ApiError::bad_request(
+            "检测到模型已变更，已清空旧索引，请重新建立索引",
+        ));
+    }
+
     let state = state.clone();
     let query = query.to_owned();
     let items = tokio::task::spawn_blocking(move || search::run_search(&state, &query, limit))
@@ -229,6 +241,42 @@ fn load_asset_text(path: &str) -> Result<String, ApiError> {
 
 fn resolved_path_key(workspace_dir: &std::path::Path, value: &str) -> String {
     model::path_to_string(&config::resolve_path(workspace_dir, value))
+}
+
+fn sync_runtime_model_index(
+    state: &AppState,
+    settings: &AppSettings,
+) -> Result<db::IndexModelSync, ApiError> {
+    if state.index_status().running {
+        return Ok(db::IndexModelSync {
+            stored_signature: db::get_index_model_signature(&state.db_path())
+                .map_err(ApiError::internal)?,
+            current_signature: None,
+            index_cleared: false,
+        });
+    }
+
+    let model_signature = model::index_model_signature(state.workspace_dir(), settings)
+        .map_err(ApiError::internal)?;
+    let sync = db::sync_index_model_signature(&state.db_path(), model_signature.as_deref())
+        .map_err(ApiError::internal)?;
+
+    if sync.index_cleared {
+        state.model_manager().clear();
+        reset_index_status(state);
+    }
+
+    Ok(sync)
+}
+
+fn reset_index_status(state: &AppState) {
+    state.update_index_status(|status| {
+        status.indexed = 0;
+        status.total = 0;
+        status.processed = 0;
+        status.current_file = None;
+        status.error = None;
+    });
 }
 
 #[derive(Debug, Deserialize)]

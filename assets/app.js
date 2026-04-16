@@ -8,6 +8,7 @@ function puppyFind() {
         results: [],
         indexStatus: {
             running: false,
+            indexed: 0,
             total: 0,
             processed: 0,
             current_file: null,
@@ -79,6 +80,14 @@ function puppyFind() {
                 const messages = [];
                 if (data.index_cleared) {
                     this.results = [];
+                    this.indexStatus = {
+                        ...this.indexStatus,
+                        indexed: 0,
+                        total: 0,
+                        processed: 0,
+                        current_file: null,
+                        error: null
+                    };
                     messages.push('配置已保存，索引上下文已重置，请重新建索引。');
                 } else if (!silent) {
                     messages.push('配置已保存。');

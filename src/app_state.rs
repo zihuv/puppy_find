@@ -17,6 +17,7 @@ pub struct AppState {
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct IndexStatus {
     pub running: bool,
+    pub indexed: usize,
     pub total: usize,
     pub processed: usize,
     pub current_file: Option<String>,
@@ -24,11 +25,14 @@ pub struct IndexStatus {
 }
 
 impl AppState {
-    pub fn new(workspace_dir: PathBuf, settings: AppSettings) -> Self {
+    pub fn new(workspace_dir: PathBuf, settings: AppSettings, indexed: usize) -> Self {
         Self {
             workspace_dir: Arc::new(workspace_dir),
             settings: Arc::new(Mutex::new(settings)),
-            index_status: Arc::new(Mutex::new(IndexStatus::default())),
+            index_status: Arc::new(Mutex::new(IndexStatus {
+                indexed,
+                ..IndexStatus::default()
+            })),
             model_manager: ModelManager::default(),
         }
     }
@@ -84,8 +88,10 @@ impl AppState {
             return false;
         }
 
+        let indexed = status.indexed;
         *status = IndexStatus {
             running: true,
+            indexed,
             total: 0,
             processed: 0,
             current_file: None,

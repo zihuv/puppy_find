@@ -66,12 +66,13 @@
 
                 <div class="progress compact">
                     <div>
-                        <span>总数</span>
-                        <strong x-text="indexStatus.total"></strong>
+                        <span>索引数</span>
+                        <strong x-text="indexStatus.indexed"></strong>
                     </div>
                     <div>
-                        <span>已处理</span>
-                        <strong x-text="indexStatus.processed"></strong>
+                        <span>扫描进度</span>
+                        <strong
+                            x-text="indexStatus.running || indexStatus.total ? `${indexStatus.processed}/${indexStatus.total}` : '0/0'"></strong>
                     </div>
                 </div>
 
