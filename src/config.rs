@@ -215,17 +215,6 @@ pub fn validate_db_path(workspace_dir: &Path, value: &str) -> Result<String> {
     Ok(trimmed.to_owned())
 }
 
-pub fn validate_host(value: &str) -> Result<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        bail!("HOST 不能为空");
-    }
-    if trimmed.chars().any(char::is_whitespace) {
-        bail!("HOST 不能包含空白字符");
-    }
-    Ok(trimmed.to_owned())
-}
-
 pub fn validate_omni_intra_threads(value: usize) -> Result<usize> {
     if value == 0 {
         bail!("OMNI_INTRA_THREADS 必须大于 0");

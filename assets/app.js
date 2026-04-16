@@ -2,10 +2,6 @@ function puppyFind() {
     return {
         form: {
             model_path: '',
-            omni_intra_threads: 4,
-            omni_fgclip_max_patches: 256,
-            host: '127.0.0.1',
-            port: 3000,
             asset_dir: ''
         },
         query: '',
@@ -37,10 +33,6 @@ function puppyFind() {
                 const response = await fetch('/api/settings');
                 const data = await this.parseJson(response);
                 this.form.model_path = data.model_path || '';
-                this.form.omni_intra_threads = Number(data.omni_intra_threads || 4);
-                this.form.omni_fgclip_max_patches = Number(data.omni_fgclip_max_patches || 256);
-                this.form.host = data.host || '127.0.0.1';
-                this.form.port = Number(data.port || 3000);
                 this.form.asset_dir = data.asset_dir || '';
             } catch (error) {
                 this.error = error.message;
@@ -59,8 +51,8 @@ function puppyFind() {
         },
 
         async saveSettings(silent = false) {
-            if (!this.form.model_path || !this.form.omni_intra_threads || !this.form.omni_fgclip_max_patches || !this.form.host || !this.form.port || !this.form.asset_dir) {
-                this.error = '请先填写 MODEL_PATH、OMNI_INTRA_THREADS、OMNI_FGCLIP_MAX_PATCHES、HOST、PORT 和素材目录';
+            if (!this.form.model_path || !this.form.asset_dir) {
+                this.error = '请先填写 MODEL_PATH 和素材目录';
                 return false;
             }
 
@@ -83,10 +75,6 @@ function puppyFind() {
                     throw new Error(data.error || '保存配置失败');
                 }
                 this.form.model_path = data.model_path;
-                this.form.omni_intra_threads = Number(data.omni_intra_threads || 4);
-                this.form.omni_fgclip_max_patches = Number(data.omni_fgclip_max_patches || 256);
-                this.form.host = data.host;
-                this.form.port = Number(data.port || 3000);
                 this.form.asset_dir = data.asset_dir;
                 const messages = [];
                 if (data.index_cleared) {
@@ -94,9 +82,6 @@ function puppyFind() {
                     messages.push('配置已保存，索引上下文已重置，请重新建索引。');
                 } else if (!silent) {
                     messages.push('配置已保存。');
-                }
-                if (data.restart_required) {
-                    messages.push('HOST/PORT 已写入 .env，重启程序后生效。');
                 }
                 if (messages.length) {
                     this.message = messages.join(' ');
