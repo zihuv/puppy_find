@@ -32,13 +32,6 @@
             </td>
         </tr>
         <tr>
-            <td>macOS Intel</td>
-            <td>
-                <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-macos-x64-nomodel.tar.gz"><img src="https://img.shields.io/badge/无模型-Intel-%23000000.svg?logo=apple"></a><br>
-                <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-macos-x64-model.tar.gz"><img src="https://img.shields.io/badge/附模型-Intel-555555.svg?logo=apple"></a>
-            </td>
-        </tr>
-        <tr>
             <td>macOS Apple Silicon</td>
             <td>
                 <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-macos-arm64-nomodel.tar.gz"><img src="https://img.shields.io/badge/无模型-Apple%20Silicon-%23000000.svg?logo=apple"></a><br>

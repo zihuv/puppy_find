@@ -137,18 +137,6 @@ jobs:
             binary_name: puppy_find
             flavor: model
             include_model: true
-          - runner: macos-15-intel
-            platform: macos
-            package_id: macos-x64
-            binary_name: puppy_find
-            flavor: nomodel
-            include_model: false
-          - runner: macos-15-intel
-            platform: macos
-            package_id: macos-x64
-            binary_name: puppy_find
-            flavor: model
-            include_model: true
           - runner: macos-15
             platform: macos
             package_id: macos-arm64
@@ -205,17 +193,17 @@ jobs:
         id: package
         shell: pwsh
         run: |
-          $arguments = @(
-            '-BinaryPath', "./target/release/${{ matrix.binary_name }}",
-            '-Platform', '${{ matrix.platform }}',
-            '-PackageId', '${{ matrix.package_id }}',
-            '-Version', '${{ needs.prepare.outputs.version }}',
-            '-Flavor', '${{ matrix.flavor }}',
-            '-OutputDir', './release-artifacts'
-          )
+          $arguments = @{
+            BinaryPath = "./target/release/${{ matrix.binary_name }}"
+            Platform = '${{ matrix.platform }}'
+            PackageId = '${{ matrix.package_id }}'
+            Version = '${{ needs.prepare.outputs.version }}'
+            Flavor = '${{ matrix.flavor }}'
+            OutputDir = './release-artifacts'
+          }
 
           if ('${{ matrix.include_model }}' -eq 'true') {
-            $arguments += @('-ModelSourceDir', './.model-cache')
+            $arguments.ModelSourceDir = './.model-cache'
           }
 
           $archivePath = & ./scripts/package-release.ps1 @arguments
