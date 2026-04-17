@@ -68,7 +68,8 @@ async fn save_settings(
     let model_path = model::validate_model_dir(
         workspace_dir,
         &payload.model_path,
-        old_settings.omni_intra_threads,
+        old_settings.omni_device,
+        &old_settings.omni_intra_threads,
         old_settings.omni_fgclip_max_patches,
     )
     .map_err(ApiError::bad_request)?;
@@ -78,7 +79,8 @@ async fn save_settings(
     let new_settings = AppSettings {
         db_path: old_settings.db_path.clone(),
         model_path,
-        omni_intra_threads: old_settings.omni_intra_threads,
+        omni_device: old_settings.omni_device,
+        omni_intra_threads: old_settings.omni_intra_threads.clone(),
         omni_fgclip_max_patches: old_settings.omni_fgclip_max_patches,
         host: old_settings.host.clone(),
         port: old_settings.port,
@@ -131,7 +133,8 @@ async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResp
     model::validate_model_dir(
         state.workspace_dir(),
         &settings.model_path,
-        settings.omni_intra_threads,
+        settings.omni_device,
+        &settings.omni_intra_threads,
         settings.omni_fgclip_max_patches,
     )
     .map_err(ApiError::bad_request)?;

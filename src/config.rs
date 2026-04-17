@@ -2,19 +2,21 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
+use std::{fmt, str::FromStr};
 
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use omni_search::{RuntimeDevice, default_intra_threads as omni_default_intra_threads};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const CONFIG_DIR_NAME: &str = "config";
 const ENV_FILE_NAME: &str = ".env";
-const LEGACY_ENV_FILE_NAME: &str = ".env";
 const DEFAULT_MODEL_DIR: &str = "./config/model";
 const DEFAULT_LOG_DIR: &str = "./config/log";
 const DEFAULT_ASSET_DIR: &str = "./materials";
 const KEY_DB_PATH: &str = "DB_PATH";
 const KEY_MODEL_PATH: &str = "MODEL_PATH";
 const KEY_MODEL_DIR_LEGACY: &str = "MODEL_DIR";
+const KEY_OMNI_DEVICE: &str = "OMNI_DEVICE";
 const KEY_OMNI_INTRA_THREADS: &str = "OMNI_INTRA_THREADS";
 const KEY_OMNI_FGCLIP_MAX_PATCHES: &str = "OMNI_FGCLIP_MAX_PATCHES";
 const KEY_HOST: &str = "HOST";
@@ -24,12 +26,103 @@ const KEY_LOG_DIR: &str = "LOG_DIR";
 const KEY_IMAGE_DIR_LEGACY: &str = "IMAGE_DIR";
 const SUPPORTED_FGCLIP_MAX_PATCHES: [usize; 5] = [128, 256, 576, 784, 1024];
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OmniIntraThreads {
+    Auto,
+    Fixed(usize),
+}
+
+impl OmniIntraThreads {
+    pub fn resolved(&self) -> usize {
+        match self {
+            Self::Auto => omni_default_intra_threads(),
+            Self::Fixed(value) => *value,
+        }
+    }
+
+    pub fn as_env_value(&self) -> String {
+        match self {
+            Self::Auto => "auto".to_owned(),
+            Self::Fixed(value) => value.to_string(),
+        }
+    }
+}
+
+impl Default for OmniIntraThreads {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl fmt::Display for OmniIntraThreads {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Auto => f.write_str("auto"),
+            Self::Fixed(value) => write!(f, "{value}"),
+        }
+    }
+}
+
+impl FromStr for OmniIntraThreads {
+    type Err = anyhow::Error;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        if value.trim().eq_ignore_ascii_case("auto") {
+            return Ok(Self::Auto);
+        }
+
+        let value = value
+            .parse::<usize>()
+            .context("failed to parse OMNI_INTRA_THREADS")?;
+        validate_omni_intra_threads(value)?;
+        Ok(Self::Fixed(value))
+    }
+}
+
+impl Serialize for OmniIntraThreads {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Auto => serializer.serialize_str("auto"),
+            Self::Fixed(value) => serializer.serialize_u64(*value as u64),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for OmniIntraThreads {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            String(String),
+            Number(usize),
+        }
+
+        match Repr::deserialize(deserializer)? {
+            Repr::String(value) => OmniIntraThreads::from_str(&value)
+                .map_err(|error| serde::de::Error::custom(error.to_string())),
+            Repr::Number(value) => {
+                validate_omni_intra_threads(value)
+                    .map_err(|error| serde::de::Error::custom(error.to_string()))?;
+                Ok(OmniIntraThreads::Fixed(value))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppSettings {
     pub db_path: String,
     pub model_path: String,
+    #[serde(default = "default_omni_device")]
+    pub omni_device: RuntimeDevice,
     #[serde(default = "default_omni_intra_threads")]
-    pub omni_intra_threads: usize,
+    pub omni_intra_threads: OmniIntraThreads,
     #[serde(default = "default_omni_fgclip_max_patches")]
     pub omni_fgclip_max_patches: usize,
     pub host: String,
@@ -38,8 +131,12 @@ pub struct AppSettings {
     pub log_dir: String,
 }
 
-fn default_omni_intra_threads() -> usize {
-    4
+fn default_omni_device() -> RuntimeDevice {
+    RuntimeDevice::Auto
+}
+
+fn default_omni_intra_threads() -> OmniIntraThreads {
+    OmniIntraThreads::Auto
 }
 
 fn default_omni_fgclip_max_patches() -> usize {
@@ -57,6 +154,7 @@ impl AppSettings {
         Self {
             db_path: "./puppy_find.db".to_owned(),
             model_path: DEFAULT_MODEL_DIR.to_owned(),
+            omni_device: default_omni_device(),
             omni_intra_threads: default_omni_intra_threads(),
             omni_fgclip_max_patches: default_omni_fgclip_max_patches(),
             host: "127.0.0.1".to_owned(),
@@ -65,12 +163,14 @@ impl AppSettings {
             log_dir: DEFAULT_LOG_DIR.to_owned(),
         }
     }
+
+    pub fn resolved_omni_intra_threads(&self) -> usize {
+        self.omni_intra_threads.resolved()
+    }
 }
 
 pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
     ensure_default_layout(workspace_dir)?;
-    let migrated_from_legacy =
-        !env_path(workspace_dir).is_file() && legacy_env_path(workspace_dir).is_file();
     let existing_text = read_existing_env_text(workspace_dir)?;
 
     let parsed = existing_text
@@ -90,11 +190,14 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
             .cloned()
             .or_else(|| parsed.get(KEY_MODEL_DIR_LEGACY).cloned())
             .unwrap_or_else(|| defaults.model_path.clone()),
+        omni_device: parsed
+            .get(KEY_OMNI_DEVICE)
+            .and_then(|value| parse_runtime_device(value).ok())
+            .unwrap_or(defaults.omni_device),
         omni_intra_threads: parsed
             .get(KEY_OMNI_INTRA_THREADS)
-            .and_then(|value| value.parse::<usize>().ok())
-            .and_then(|value| validate_omni_intra_threads(value).ok())
-            .unwrap_or(defaults.omni_intra_threads),
+            .and_then(|value| parse_omni_intra_threads(value).ok())
+            .unwrap_or_else(|| defaults.omni_intra_threads.clone()),
         omni_fgclip_max_patches: parsed
             .get(KEY_OMNI_FGCLIP_MAX_PATCHES)
             .and_then(|value| value.parse::<usize>().ok())
@@ -124,6 +227,7 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
     let missing_required_keys = [
         KEY_DB_PATH,
         KEY_MODEL_PATH,
+        KEY_OMNI_DEVICE,
         KEY_OMNI_INTRA_THREADS,
         KEY_OMNI_FGCLIP_MAX_PATCHES,
         KEY_HOST,
@@ -141,13 +245,12 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
     let invalid_port = parsed
         .get(KEY_PORT)
         .is_some_and(|value| value.parse::<u16>().is_err());
-    let invalid_omni_intra_threads = parsed.get(KEY_OMNI_INTRA_THREADS).is_some_and(|value| {
-        value
-            .parse::<usize>()
-            .ok()
-            .and_then(|value| validate_omni_intra_threads(value).ok())
-            .is_none()
-    });
+    let invalid_omni_device = parsed
+        .get(KEY_OMNI_DEVICE)
+        .is_some_and(|value| parse_runtime_device(value).is_err());
+    let invalid_omni_intra_threads = parsed
+        .get(KEY_OMNI_INTRA_THREADS)
+        .is_some_and(|value| parse_omni_intra_threads(value).is_err());
     let invalid_omni_fgclip_max_patches =
         parsed
             .get(KEY_OMNI_FGCLIP_MAX_PATCHES)
@@ -160,11 +263,11 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
             });
 
     if existing_text.is_none()
-        || migrated_from_legacy
         || missing_required_keys
         || used_legacy_keys
         || invalid_host
         || invalid_port
+        || invalid_omni_device
         || invalid_omni_intra_threads
         || invalid_omni_fgclip_max_patches
     {
@@ -231,6 +334,19 @@ pub fn validate_omni_intra_threads(value: usize) -> Result<usize> {
     Ok(value)
 }
 
+fn parse_runtime_device(value: &str) -> Result<RuntimeDevice> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(RuntimeDevice::Auto),
+        "cpu" => Ok(RuntimeDevice::Cpu),
+        "gpu" => Ok(RuntimeDevice::Gpu),
+        _ => bail!("OMNI_DEVICE 必须是 auto、cpu 或 gpu"),
+    }
+}
+
+fn parse_omni_intra_threads(value: &str) -> Result<OmniIntraThreads> {
+    OmniIntraThreads::from_str(value)
+}
+
 pub fn validate_omni_fgclip_max_patches(value: usize) -> Result<usize> {
     if !SUPPORTED_FGCLIP_MAX_PATCHES.contains(&value) {
         bail!("OMNI_FGCLIP_MAX_PATCHES 必须是 128、256、576、784 或 1024");
@@ -243,11 +359,12 @@ pub fn needs_setup(settings: &AppSettings) -> bool {
 }
 
 fn env_path(workspace_dir: &Path) -> PathBuf {
-    config_dir_path(workspace_dir).join(ENV_FILE_NAME)
-}
-
-fn legacy_env_path(workspace_dir: &Path) -> PathBuf {
-    workspace_dir.join(LEGACY_ENV_FILE_NAME)
+    let root_env_path = workspace_dir.join(ENV_FILE_NAME);
+    if root_env_path.is_file() {
+        root_env_path
+    } else {
+        config_dir_path(workspace_dir).join(ENV_FILE_NAME)
+    }
 }
 
 fn config_dir_path(workspace_dir: &Path) -> PathBuf {
@@ -269,19 +386,8 @@ fn read_existing_env_text(workspace_dir: &Path) -> Result<Option<String>> {
     let env_path = env_path(workspace_dir);
     match fs::read_to_string(&env_path) {
         Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == ErrorKind::NotFound => read_legacy_env_text(workspace_dir),
-        Err(error) => Err(error).with_context(|| format!("failed to read {}", env_path.display())),
-    }
-}
-
-fn read_legacy_env_text(workspace_dir: &Path) -> Result<Option<String>> {
-    let legacy_path = legacy_env_path(workspace_dir);
-    match fs::read_to_string(&legacy_path) {
-        Ok(text) => Ok(Some(text)),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => {
-            Err(error).with_context(|| format!("failed to read {}", legacy_path.display()))
-        }
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", env_path.display())),
     }
 }
 
@@ -345,6 +451,7 @@ fn render_env_file(existing_text: &str, settings: &AppSettings) -> String {
     for key in [
         KEY_DB_PATH,
         KEY_MODEL_PATH,
+        KEY_OMNI_DEVICE,
         KEY_OMNI_INTRA_THREADS,
         KEY_OMNI_FGCLIP_MAX_PATCHES,
         KEY_HOST,
@@ -369,9 +476,13 @@ fn render_known_line(key: &str, settings: &AppSettings) -> Option<String> {
             KEY_MODEL_PATH,
             &settings.model_path,
         )),
+        KEY_OMNI_DEVICE => Some(render_string_assignment(
+            KEY_OMNI_DEVICE,
+            &settings.omni_device.to_string(),
+        )),
         KEY_OMNI_INTRA_THREADS => Some(format!(
             "{KEY_OMNI_INTRA_THREADS}={}",
-            settings.omni_intra_threads
+            settings.omni_intra_threads.as_env_value()
         )),
         KEY_OMNI_FGCLIP_MAX_PATCHES => Some(format!(
             "{KEY_OMNI_FGCLIP_MAX_PATCHES}={}",
@@ -470,7 +581,9 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{env_path, load_or_create, resolve_path, validate_db_path};
+    use omni_search::RuntimeDevice;
+
+    use super::{OmniIntraThreads, env_path, load_or_create, resolve_path, save, validate_db_path};
 
     #[test]
     fn resolve_path_normalizes_relative_segments() {
@@ -504,34 +617,63 @@ mod tests {
 
         assert_eq!(settings.model_path, "./config/model");
         assert_eq!(settings.log_dir, "./config/log");
+        assert_eq!(settings.omni_device, RuntimeDevice::Auto);
+        assert_eq!(settings.omni_intra_threads, OmniIntraThreads::Auto);
         assert!(workspace_dir.join("config").join("model").is_dir());
         assert!(workspace_dir.join("config").join("log").is_dir());
         assert!(workspace_dir.join("materials").is_dir());
+        assert_eq!(
+            env_path(&workspace_dir),
+            workspace_dir.join("config").join(".env")
+        );
         assert!(env_text.contains("MODEL_PATH=\"./config/model\""));
+        assert!(env_text.contains("OMNI_DEVICE=\"auto\""));
         assert!(env_text.contains("LOG_DIR=\"./config/log\""));
 
         let _ = fs::remove_dir_all(&workspace_dir);
     }
 
     #[test]
-    fn load_or_create_migrates_legacy_root_env() {
+    fn load_or_create_prefers_root_env_when_present() {
         let workspace_dir = unique_test_dir();
         fs::create_dir_all(&workspace_dir).unwrap();
         fs::write(
             workspace_dir.join(".env"),
-            "DB_PATH=\"./legacy.db\"\nMODEL_PATH=\"./legacy-model\"\nOMNI_INTRA_THREADS=6\nOMNI_FGCLIP_MAX_PATCHES=576\nHOST=\"0.0.0.0\"\nPORT=4000\nASSET_DIR=\"./legacy-assets\"\nLOG_DIR=\"./legacy-log\"\n",
+            "DB_PATH=\"./legacy.db\"\nMODEL_PATH=\"./legacy-model\"\nOMNI_DEVICE=\"gpu\"\nOMNI_INTRA_THREADS=auto\nOMNI_FGCLIP_MAX_PATCHES=576\nHOST=\"0.0.0.0\"\nPORT=4000\nASSET_DIR=\"./legacy-assets\"\nLOG_DIR=\"./legacy-log\"\n",
         )
         .unwrap();
 
         let settings = load_or_create(&workspace_dir).unwrap();
-        let migrated_env = fs::read_to_string(env_path(&workspace_dir)).unwrap();
+        let root_env = fs::read_to_string(env_path(&workspace_dir)).unwrap();
 
         assert_eq!(settings.db_path, "./legacy.db");
         assert_eq!(settings.model_path, "./legacy-model");
+        assert_eq!(settings.omni_device, RuntimeDevice::Gpu);
+        assert_eq!(settings.omni_intra_threads, OmniIntraThreads::Auto);
         assert_eq!(settings.asset_dir, "./legacy-assets");
         assert_eq!(settings.log_dir, "./legacy-log");
-        assert!(migrated_env.contains("DB_PATH=\"./legacy.db\""));
-        assert!(migrated_env.contains("LOG_DIR=\"./legacy-log\""));
+        assert_eq!(env_path(&workspace_dir), workspace_dir.join(".env"));
+        assert!(root_env.contains("DB_PATH=\"./legacy.db\""));
+        assert!(root_env.contains("OMNI_DEVICE=\"gpu\""));
+        assert!(root_env.contains("OMNI_INTRA_THREADS=auto"));
+        assert!(root_env.contains("LOG_DIR=\"./legacy-log\""));
+        assert!(!workspace_dir.join("config").join(".env").exists());
+
+        let _ = fs::remove_dir_all(&workspace_dir);
+    }
+
+    #[test]
+    fn save_preserves_auto_intra_threads_literal() {
+        let workspace_dir = unique_test_dir();
+        fs::create_dir_all(&workspace_dir).unwrap();
+
+        let mut settings = load_or_create(&workspace_dir).unwrap();
+        settings.omni_intra_threads = OmniIntraThreads::Auto;
+        save(&workspace_dir, &settings).unwrap();
+
+        let env_text = fs::read_to_string(env_path(&workspace_dir)).unwrap();
+
+        assert!(env_text.contains("OMNI_INTRA_THREADS=auto"));
 
         let _ = fs::remove_dir_all(&workspace_dir);
     }

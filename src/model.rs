@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result, anyhow, bail};
-use omni_search::{OmniSearch, OmniSearchBuilder, probe_local_model_dir};
+use omni_search::{OmniSearch, OmniSearchBuilder, RuntimeDevice, probe_local_model_dir};
 use walkdir::WalkDir;
 
-use crate::config::AppSettings;
+use crate::config::{AppSettings, OmniIntraThreads};
 
 #[derive(Clone, Default)]
 pub struct ModelManager {
@@ -23,7 +23,8 @@ struct ModelSlot {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ModelCacheKey {
     model_dir: PathBuf,
-    omni_intra_threads: usize,
+    omni_device: RuntimeDevice,
+    omni_intra_threads: OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 }
 
@@ -79,7 +80,8 @@ impl ModelManager {
             normalize_existing_dir(workspace_dir, Path::new(&settings.model_path), "模型目录")?;
         let model_key = ModelCacheKey {
             model_dir: normalized.clone(),
-            omni_intra_threads: settings.omni_intra_threads,
+            omni_device: settings.omni_device,
+            omni_intra_threads: settings.omni_intra_threads.clone(),
             omni_fgclip_max_patches: settings.omni_fgclip_max_patches,
         };
 
@@ -106,7 +108,8 @@ impl ModelManager {
 pub fn validate_model_dir(
     workspace_dir: &Path,
     value: &str,
-    omni_intra_threads: usize,
+    omni_device: RuntimeDevice,
+    omni_intra_threads: &OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 ) -> Result<String> {
     let trimmed = trim_path_input(value, "模型目录")?;
@@ -122,6 +125,7 @@ pub fn validate_model_dir(
 
     ensure_model_loadable(
         &probe.normalized_path,
+        omni_device,
         omni_intra_threads,
         omni_fgclip_max_patches,
     )?;
@@ -203,28 +207,37 @@ fn trim_path_input<'a>(value: &'a str, label: &str) -> Result<&'a str> {
 fn apply_runtime_settings(builder: &mut OmniSearchBuilder, settings: &AppSettings) {
     apply_runtime_overrides(
         builder,
-        settings.omni_intra_threads,
+        settings.omni_device,
+        &settings.omni_intra_threads,
         settings.omni_fgclip_max_patches,
     );
 }
 
 fn apply_runtime_overrides(
     builder: &mut OmniSearchBuilder,
-    omni_intra_threads: usize,
+    omni_device: RuntimeDevice,
+    omni_intra_threads: &OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 ) {
-    builder.intra_threads(omni_intra_threads);
+    builder.device(omni_device);
+    builder.intra_threads(omni_intra_threads.resolved());
     builder.fgclip_max_patches(omni_fgclip_max_patches);
 }
 
 fn ensure_model_loadable(
     model_dir: &Path,
-    omni_intra_threads: usize,
+    omni_device: RuntimeDevice,
+    omni_intra_threads: &OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 ) -> Result<()> {
     let mut builder = OmniSearch::builder();
     builder.from_local_model_dir(model_dir);
-    apply_runtime_overrides(&mut builder, omni_intra_threads, omni_fgclip_max_patches);
+    apply_runtime_overrides(
+        &mut builder,
+        omni_device,
+        omni_intra_threads,
+        omni_fgclip_max_patches,
+    );
     builder
         .build()
         .with_context(|| format!("failed to load model bundle from {}", model_dir.display()))?;
