@@ -23,6 +23,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   MODEL_REPO: zihuv/chinese-clip-vit-base-patch16-onnx
+  PACKAGE_CONFIG_DIR: config
 
 jobs:
   prepare:
@@ -200,6 +201,7 @@ jobs:
             --version "${{ needs.prepare.outputs.version }}"
             --flavor "${{ matrix.flavor }}"
             --output-dir "./release-artifacts"
+            --config-dir "${{ env.PACKAGE_CONFIG_DIR }}"
           )
 
           if [ "${{ matrix.include_model }}" = "true" ]; then

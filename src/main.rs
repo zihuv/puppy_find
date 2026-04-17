@@ -6,23 +6,37 @@ mod model;
 mod search;
 mod web;
 
+use std::fs;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::app_state::AppState;
 
+const LOG_FILE_PREFIX: &str = "puppy_find.log";
+const PRODUCTION_LOG_RETENTION_DAYS: u64 = 7;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing();
-
-    let workspace_dir = std::env::current_dir().context("failed to read current directory")?;
+    let workspace_dir = resolve_workspace_dir()?;
     let settings = config::load_or_create(&workspace_dir)?;
+    let _log_guard = init_tracing(&workspace_dir, &settings);
     let db_path_value = config::validate_db_path(&workspace_dir, &settings.db_path)?;
     let db_path = config::resolve_path(&workspace_dir, &db_path_value);
+
+    info!("workspace directory: {}", workspace_dir.display());
+    info!(
+        "file logs: {}",
+        config::resolve_path(&workspace_dir, &settings.log_dir).display()
+    );
 
     db::init(&db_path)?;
     let model_signature = model::index_model_signature(&workspace_dir, &settings)?;
@@ -61,14 +75,111 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn init_tracing() {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+fn resolve_workspace_dir() -> anyhow::Result<PathBuf> {
+    if cfg!(debug_assertions) {
+        return std::env::current_dir().context("failed to read current directory");
+    }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
+    let executable = std::env::current_exe().context("failed to read executable path")?;
+    executable
+        .parent()
+        .map(Path::to_path_buf)
+        .context("executable path does not have a parent directory")
+}
+
+fn init_tracing(
+    workspace_dir: &Path,
+    settings: &crate::config::AppSettings,
+) -> Option<WorkerGuard> {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let log_dir = config::resolve_path(workspace_dir, &settings.log_dir);
+
+    let log_appender = match prepare_log_appender(&log_dir) {
+        Ok(log_appender) => log_appender,
+        Err(error) => {
+            eprintln!(
+                "failed to initialize file logging at {}: {error}",
+                log_dir.display()
+            );
+
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .with_target(false)
+                .compact()
+                .init();
+            return None;
+        }
+    };
+
+    let (file_writer, guard) = tracing_appender::non_blocking(log_appender);
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
         .with_target(false)
         .compact()
-        .init();
+        .with_writer(file_writer);
+
+    if cfg!(debug_assertions) {
+        let console_layer = tracing_subscriber::fmt::layer()
+            .with_target(false)
+            .compact()
+            .with_writer(std::io::stderr);
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(file_layer)
+            .with(console_layer)
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(file_layer)
+            .init();
+    }
+
+    Some(guard)
+}
+
+fn prepare_log_appender(
+    log_dir: &Path,
+) -> std::io::Result<tracing_appender::rolling::RollingFileAppender> {
+    fs::create_dir_all(log_dir)?;
+    if !cfg!(debug_assertions) {
+        prune_old_logs(log_dir)?;
+    }
+
+    Ok(tracing_appender::rolling::daily(log_dir, LOG_FILE_PREFIX))
+}
+
+fn prune_old_logs(log_dir: &Path) -> std::io::Result<()> {
+    let retention = Duration::from_secs(PRODUCTION_LOG_RETENTION_DAYS * 24 * 60 * 60);
+    let Some(cutoff) = SystemTime::now().checked_sub(retention) else {
+        return Ok(());
+    };
+
+    for entry in fs::read_dir(log_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if !file_name.starts_with(LOG_FILE_PREFIX) {
+            continue;
+        }
+
+        let modified = match entry.metadata().and_then(|metadata| metadata.modified()) {
+            Ok(modified) => modified,
+            Err(_) => continue,
+        };
+        if modified >= cutoff {
+            continue;
+        }
+
+        let _ = fs::remove_file(entry.path());
+    }
+
+    Ok(())
 }
 
 fn browser_base_url(settings: &crate::config::AppSettings, address: SocketAddr) -> String {

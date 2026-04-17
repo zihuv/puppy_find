@@ -1,7 +1,9 @@
 /target
 .env
+/config/
 *.db
 *.sqlite3
+*.log
 /materials
 /.dist
 /release-artifacts

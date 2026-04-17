@@ -83,6 +83,7 @@ async fn save_settings(
         host: old_settings.host.clone(),
         port: old_settings.port,
         asset_dir,
+        log_dir: old_settings.log_dir.clone(),
     };
     let old_model_path = resolved_path_key(workspace_dir, &old_settings.model_path);
     let new_model_path = resolved_path_key(workspace_dir, &new_settings.model_path);

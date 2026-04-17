@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--version", required=True)
     parser.add_argument("--flavor", required=True, choices=["nomodel", "model"])
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--config-dir", default="config")
     parser.add_argument("--model-source-dir")
     return parser.parse_args()
 
@@ -81,8 +82,13 @@ def build_bundle(args: argparse.Namespace) -> Path:
     binary_name = binary.name
     shutil.copy2(binary, bundle_root / binary_name)
 
-    model_dir = bundle_root / "model"
+    config_root = bundle_root / args.config_dir
+    config_root.mkdir(parents=True, exist_ok=True)
+
+    model_dir = config_root / "model"
     model_dir.mkdir()
+    (config_root / "log").mkdir()
+    (bundle_root / "materials").mkdir()
 
     if args.flavor == "model":
         if not args.model_source_dir:
@@ -102,22 +108,19 @@ def build_bundle(args: argparse.Namespace) -> Path:
             "Download the Hugging Face repository below into this folder without adding an extra nested directory:\n"
             f"{MODEL_REPO_URL}\n\n"
             "Expected result:\n"
-            "  ./model/model_config.json\n"
-            "  ./model/text.onnx\n"
-            "  ./model/visual.onnx\n"
-            "  ./model/vocab.txt\n",
+            "  ./config/model/model_config.json\n"
+            "  ./config/model/text.onnx\n"
+            "  ./config/model/visual.onnx\n"
+            "  ./config/model/vocab.txt\n",
         )
 
     write_text(
-        bundle_root / ".env",
-        "# PuppyFind portable configuration\n"
-        'DB_PATH="./puppy_find.db"\n'
-        'MODEL_PATH="./model"\n'
-        "OMNI_INTRA_THREADS=4\n"
-        "OMNI_FGCLIP_MAX_PATCHES=256\n"
-        'HOST="127.0.0.1"\n'
-        "PORT=3000\n"
-        'ASSET_DIR="./"\n',
+        config_root / "README.txt",
+        "Runtime configuration is generated automatically on first launch.\n"
+        "Files and folders in this directory:\n"
+        "  ./.env          generated local configuration\n"
+        "  ./model/        local model bundle\n"
+        "  ./log/          application log files\n",
     )
 
     if args.platform == "windows":

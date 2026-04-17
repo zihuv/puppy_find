@@ -6,7 +6,12 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
+const CONFIG_DIR_NAME: &str = "config";
 const ENV_FILE_NAME: &str = ".env";
+const LEGACY_ENV_FILE_NAME: &str = ".env";
+const DEFAULT_MODEL_DIR: &str = "./config/model";
+const DEFAULT_LOG_DIR: &str = "./config/log";
+const DEFAULT_ASSET_DIR: &str = "./materials";
 const KEY_DB_PATH: &str = "DB_PATH";
 const KEY_MODEL_PATH: &str = "MODEL_PATH";
 const KEY_MODEL_DIR_LEGACY: &str = "MODEL_DIR";
@@ -15,6 +20,7 @@ const KEY_OMNI_FGCLIP_MAX_PATCHES: &str = "OMNI_FGCLIP_MAX_PATCHES";
 const KEY_HOST: &str = "HOST";
 const KEY_PORT: &str = "PORT";
 const KEY_ASSET_DIR: &str = "ASSET_DIR";
+const KEY_LOG_DIR: &str = "LOG_DIR";
 const KEY_IMAGE_DIR_LEGACY: &str = "IMAGE_DIR";
 const SUPPORTED_FGCLIP_MAX_PATCHES: [usize; 5] = [128, 256, 576, 784, 1024];
 
@@ -29,6 +35,7 @@ pub struct AppSettings {
     pub host: String,
     pub port: u16,
     pub asset_dir: String,
+    pub log_dir: String,
 }
 
 fn default_omni_intra_threads() -> usize {
@@ -49,25 +56,22 @@ impl AppSettings {
     pub fn defaults() -> Self {
         Self {
             db_path: "./puppy_find.db".to_owned(),
-            model_path: "./models/chinese_clip_bundle".to_owned(),
+            model_path: DEFAULT_MODEL_DIR.to_owned(),
             omni_intra_threads: default_omni_intra_threads(),
             omni_fgclip_max_patches: default_omni_fgclip_max_patches(),
             host: "127.0.0.1".to_owned(),
             port: 3000,
-            asset_dir: "./materials".to_owned(),
+            asset_dir: DEFAULT_ASSET_DIR.to_owned(),
+            log_dir: DEFAULT_LOG_DIR.to_owned(),
         }
     }
 }
 
 pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
-    let env_path = env_path(workspace_dir);
-    let existing_text = match fs::read_to_string(&env_path) {
-        Ok(text) => Some(text),
-        Err(error) if error.kind() == ErrorKind::NotFound => None,
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", env_path.display()));
-        }
-    };
+    ensure_default_layout(workspace_dir)?;
+    let migrated_from_legacy =
+        !env_path(workspace_dir).is_file() && legacy_env_path(workspace_dir).is_file();
+    let existing_text = read_existing_env_text(workspace_dir)?;
 
     let parsed = existing_text
         .as_deref()
@@ -111,6 +115,10 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
             .cloned()
             .or_else(|| parsed.get(KEY_IMAGE_DIR_LEGACY).cloned())
             .unwrap_or_else(|| defaults.asset_dir.clone()),
+        log_dir: parsed
+            .get(KEY_LOG_DIR)
+            .cloned()
+            .unwrap_or_else(|| defaults.log_dir.clone()),
     };
 
     let missing_required_keys = [
@@ -121,6 +129,7 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
         KEY_HOST,
         KEY_PORT,
         KEY_ASSET_DIR,
+        KEY_LOG_DIR,
     ]
     .iter()
     .any(|key| !parsed.contains_key(*key));
@@ -151,6 +160,7 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
             });
 
     if existing_text.is_none()
+        || migrated_from_legacy
         || missing_required_keys
         || used_legacy_keys
         || invalid_host
@@ -166,13 +176,12 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
 
 pub fn save(workspace_dir: &Path, settings: &AppSettings) -> Result<()> {
     let env_path = env_path(workspace_dir);
-    let existing_text = match fs::read_to_string(&env_path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == ErrorKind::NotFound => String::new(),
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", env_path.display()));
-        }
-    };
+    if let Some(parent) = env_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let existing_text = read_existing_env_text(workspace_dir)?.unwrap_or_default();
 
     let content = render_env_file(&existing_text, settings);
     fs::write(&env_path, content)
@@ -234,7 +243,46 @@ pub fn needs_setup(settings: &AppSettings) -> bool {
 }
 
 fn env_path(workspace_dir: &Path) -> PathBuf {
-    workspace_dir.join(ENV_FILE_NAME)
+    config_dir_path(workspace_dir).join(ENV_FILE_NAME)
+}
+
+fn legacy_env_path(workspace_dir: &Path) -> PathBuf {
+    workspace_dir.join(LEGACY_ENV_FILE_NAME)
+}
+
+fn config_dir_path(workspace_dir: &Path) -> PathBuf {
+    workspace_dir.join(CONFIG_DIR_NAME)
+}
+
+fn ensure_default_layout(workspace_dir: &Path) -> Result<()> {
+    let defaults = AppSettings::defaults();
+    for relative_path in [&defaults.model_path, &defaults.log_dir, &defaults.asset_dir] {
+        let path = resolve_path(workspace_dir, relative_path);
+        fs::create_dir_all(&path)
+            .with_context(|| format!("failed to create {}", path.display()))?;
+    }
+
+    Ok(())
+}
+
+fn read_existing_env_text(workspace_dir: &Path) -> Result<Option<String>> {
+    let env_path = env_path(workspace_dir);
+    match fs::read_to_string(&env_path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == ErrorKind::NotFound => read_legacy_env_text(workspace_dir),
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", env_path.display())),
+    }
+}
+
+fn read_legacy_env_text(workspace_dir: &Path) -> Result<Option<String>> {
+    let legacy_path = legacy_env_path(workspace_dir);
+    match fs::read_to_string(&legacy_path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to read {}", legacy_path.display()))
+        }
+    }
 }
 
 fn normalize_path_lexically(path: &Path) -> PathBuf {
@@ -302,6 +350,7 @@ fn render_env_file(existing_text: &str, settings: &AppSettings) -> String {
         KEY_HOST,
         KEY_PORT,
         KEY_ASSET_DIR,
+        KEY_LOG_DIR,
     ] {
         if !seen_keys.contains(key) {
             output.push(
@@ -331,6 +380,7 @@ fn render_known_line(key: &str, settings: &AppSettings) -> Option<String> {
         KEY_HOST => Some(render_string_assignment(KEY_HOST, &settings.host)),
         KEY_PORT => Some(format!("{KEY_PORT}={}", settings.port)),
         KEY_ASSET_DIR => Some(render_string_assignment(KEY_ASSET_DIR, &settings.asset_dir)),
+        KEY_LOG_DIR => Some(render_string_assignment(KEY_LOG_DIR, &settings.log_dir)),
         _ => None,
     }
 }
@@ -420,7 +470,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{resolve_path, validate_db_path};
+    use super::{env_path, load_or_create, resolve_path, validate_db_path};
 
     #[test]
     fn resolve_path_normalizes_relative_segments() {
@@ -440,6 +490,48 @@ mod tests {
         let validated = validate_db_path(&workspace_dir, "./data/app.db").unwrap();
 
         assert_eq!(validated, "./data/app.db");
+
+        let _ = fs::remove_dir_all(&workspace_dir);
+    }
+
+    #[test]
+    fn load_or_create_writes_env_under_config_directory() {
+        let workspace_dir = unique_test_dir();
+        fs::create_dir_all(&workspace_dir).unwrap();
+
+        let settings = load_or_create(&workspace_dir).unwrap();
+        let env_text = fs::read_to_string(env_path(&workspace_dir)).unwrap();
+
+        assert_eq!(settings.model_path, "./config/model");
+        assert_eq!(settings.log_dir, "./config/log");
+        assert!(workspace_dir.join("config").join("model").is_dir());
+        assert!(workspace_dir.join("config").join("log").is_dir());
+        assert!(workspace_dir.join("materials").is_dir());
+        assert!(env_text.contains("MODEL_PATH=\"./config/model\""));
+        assert!(env_text.contains("LOG_DIR=\"./config/log\""));
+
+        let _ = fs::remove_dir_all(&workspace_dir);
+    }
+
+    #[test]
+    fn load_or_create_migrates_legacy_root_env() {
+        let workspace_dir = unique_test_dir();
+        fs::create_dir_all(&workspace_dir).unwrap();
+        fs::write(
+            workspace_dir.join(".env"),
+            "DB_PATH=\"./legacy.db\"\nMODEL_PATH=\"./legacy-model\"\nOMNI_INTRA_THREADS=6\nOMNI_FGCLIP_MAX_PATCHES=576\nHOST=\"0.0.0.0\"\nPORT=4000\nASSET_DIR=\"./legacy-assets\"\nLOG_DIR=\"./legacy-log\"\n",
+        )
+        .unwrap();
+
+        let settings = load_or_create(&workspace_dir).unwrap();
+        let migrated_env = fs::read_to_string(env_path(&workspace_dir)).unwrap();
+
+        assert_eq!(settings.db_path, "./legacy.db");
+        assert_eq!(settings.model_path, "./legacy-model");
+        assert_eq!(settings.asset_dir, "./legacy-assets");
+        assert_eq!(settings.log_dir, "./legacy-log");
+        assert!(migrated_env.contains("DB_PATH=\"./legacy.db\""));
+        assert!(migrated_env.contains("LOG_DIR=\"./legacy-log\""));
 
         let _ = fs::remove_dir_all(&workspace_dir);
     }
