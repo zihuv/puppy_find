@@ -21,14 +21,15 @@ pub fn run_search(state: &AppState, query: &str, limit: usize) -> Result<Vec<Sea
     }
 
     let db_path = state.db_path();
-    let query_vector = state
-        .model_manager()
-        .embed_text(state.workspace_dir(), &settings, query)?;
     let images = db::list_search_images(&db_path)?;
 
     if images.is_empty() {
         return Err(anyhow!("请先建立索引"));
     }
+
+    let query_vector = state
+        .model_manager()
+        .embed_text(state.workspace_dir(), &settings, query)?;
 
     let mut items = Vec::with_capacity(images.len());
     for image in images {

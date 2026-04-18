@@ -27,12 +27,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--config-dir", default="config")
     parser.add_argument("--model-source-dir")
+    parser.add_argument("--omni-device", default="auto", choices=["auto", "cpu", "gpu"])
+    parser.add_argument("--skip-runtime-libs", action="store_true")
     return parser.parse_args()
 
 
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="\n")
+
+
+def render_default_env(config_dir: str, omni_device: str) -> str:
+    config_dir = config_dir.strip("/\\")
+    return (
+        "# PuppyFind portable configuration\n"
+        'DB_PATH="./puppy_find.db"\n'
+        f'MODEL_PATH="./{config_dir}/model"\n'
+        f'OMNI_DEVICE="{omni_device}"\n'
+        "OMNI_INTRA_THREADS=auto\n"
+        "OMNI_FGCLIP_MAX_PATCHES=256\n"
+        'HOST="127.0.0.1"\n'
+        "PORT=3000\n"
+        'ASSET_DIR="./materials"\n'
+        f'LOG_DIR="./{config_dir}/log"\n'
+    )
 
 
 def copy_tree_contents(source: Path, destination: Path) -> None:
@@ -44,6 +62,20 @@ def copy_tree_contents(source: Path, destination: Path) -> None:
             shutil.copytree(child, target, dirs_exist_ok=True)
         else:
             shutil.copy2(child, target)
+
+
+def copy_runtime_libraries(binary: Path, destination: Path, platform: str) -> None:
+    patterns = {
+        "windows": ("*.dll",),
+        "linux": ("*.so", "*.so.*"),
+        "macos": ("*.dylib",),
+    }[platform]
+
+    for pattern in patterns:
+        for library in binary.parent.glob(pattern):
+            if library.is_file():
+                shutil.copy2(library, destination / library.name)
+
 
 def create_zip(source_dir: Path, archive_path: Path) -> None:
     if archive_path.exists():
@@ -81,13 +113,17 @@ def build_bundle(args: argparse.Namespace) -> Path:
 
     binary_name = binary.name
     shutil.copy2(binary, bundle_root / binary_name)
+    if not args.skip_runtime_libs:
+        copy_runtime_libraries(binary, bundle_root, args.platform)
 
     config_root = bundle_root / args.config_dir
     config_root.mkdir(parents=True, exist_ok=True)
+    write_text(config_root / ".env", render_default_env(args.config_dir, args.omni_device))
 
     model_dir = config_root / "model"
     model_dir.mkdir()
     (config_root / "log").mkdir()
+    (bundle_root / "materials").mkdir()
 
     if args.flavor == "model":
         if not args.model_source_dir:

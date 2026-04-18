@@ -8,6 +8,10 @@
 
 **按系统下载**
 
+Windows 说明：
+- `CPU Lean`：更小，默认走 `CPU`
+- `GPU DirectML`：更大，内含 `DirectML` 运行库，默认 `auto`，优先走 `GPU`，失败会退回 `CPU`
+
 <div align=left>
 <table>
     <thead align=left>
@@ -20,8 +24,12 @@
         <tr>
             <td>Windows x64</td>
             <td>
-                <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-windows-x64-nomodel.zip"><img src="https://img.shields.io/badge/无模型-ZIP-2d7d9a.svg?logo=windows"></a><br>
-                <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-windows-x64-model.zip"><img src="https://img.shields.io/badge/附模型-ZIP-67b7d1.svg?logo=windows"></a>
+                CPU Lean<br>
+                <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-windows-x64-cpu-lean-nomodel.zip"><img src="https://img.shields.io/badge/无模型-ZIP-2d7d9a.svg?logo=windows"></a><br>
+                <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-windows-x64-cpu-lean-model.zip"><img src="https://img.shields.io/badge/附模型-ZIP-67b7d1.svg?logo=windows"></a><br><br>
+                GPU DirectML<br>
+                <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-windows-x64-gpu-directml-nomodel.zip"><img src="https://img.shields.io/badge/无模型-ZIP-1c7ed6.svg?logo=windows"></a><br>
+                <a href="https://github.com/zihuv/puppy_find/releases/download/VERSION/puppy_find-VERSION-windows-x64-gpu-directml-model.zip"><img src="https://img.shields.io/badge/附模型-ZIP-4dabf7.svg?logo=windows"></a>
             </td>
         </tr>
         <tr>

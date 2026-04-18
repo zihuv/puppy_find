@@ -3,9 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use walkdir::WalkDir;
 
 use crate::app_state::AppState;
@@ -15,9 +15,12 @@ pub fn spawn_indexing(state: AppState) -> JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
         let result = run_indexing(&state);
         match result {
-            Ok(()) => {
+            Ok(warning) => {
+                if let Some(message) = warning.as_deref() {
+                    warn!("indexing completed with warnings: {message}");
+                }
                 info!("indexing finished");
-                state.finish_indexing(None);
+                state.finish_indexing(warning);
             }
             Err(error) => {
                 error!("indexing failed: {error:#}");
@@ -27,16 +30,19 @@ pub fn spawn_indexing(state: AppState) -> JoinHandle<()> {
     })
 }
 
-fn run_indexing(state: &AppState) -> Result<()> {
+fn run_indexing(state: &AppState) -> Result<Option<String>> {
     let settings = state.settings();
     let db_path = state.db_path();
     let image_dir = crate::config::resolve_path(state.workspace_dir(), &settings.asset_dir);
 
     let files = collect_image_files(&image_dir)?;
+    let total_files = files.len();
     let existing = db::list_indexed_images(&db_path)?;
+    let mut failed_count = 0usize;
+    let mut failure_samples = Vec::new();
 
     state.update_index_status(|status| {
-        status.total = files.len();
+        status.total = total_files;
         status.processed = 0;
         status.current_file = None;
         status.error = None;
@@ -73,6 +79,10 @@ fn run_indexing(state: &AppState) -> Result<()> {
                     db::upsert_image(&db_path, &record)?;
                 }
                 Err(error) => {
+                    failed_count += 1;
+                    if failure_samples.len() < 3 {
+                        failure_samples.push(format!("{path_string}: {error}"));
+                    }
                     error!("skipping {}: {error:#}", file.path.display());
                 }
             }
@@ -90,7 +100,7 @@ fn run_indexing(state: &AppState) -> Result<()> {
         status.indexed = indexed;
     });
 
-    Ok(())
+    summarize_indexing_failures(total_files, indexed, failed_count, &failure_samples)
 }
 
 pub(crate) fn count_indexable_images(image_dir: &Path) -> Result<usize> {
@@ -181,4 +191,46 @@ struct FileEntry {
     file_name: String,
     mtime_ms: i64,
     size_bytes: i64,
+}
+
+fn summarize_indexing_failures(
+    total_files: usize,
+    indexed: usize,
+    failed_count: usize,
+    failure_samples: &[String],
+) -> Result<Option<String>> {
+    if failed_count == 0 {
+        return Ok(None);
+    }
+
+    let sample_text = failure_samples.join("；");
+    if indexed == 0 {
+        return Err(anyhow!(
+            "索引失败：共扫描 {total_files} 张图片，{failed_count} 张嵌入失败。示例：{sample_text}"
+        ));
+    }
+
+    Ok(Some(format!(
+        "索引完成，但有 {failed_count}/{total_files} 张图片处理失败，当前已写入 {indexed} 条。示例：{sample_text}"
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn summarize_indexing_failures_returns_error_when_everything_failed() {
+        let error =
+            super::summarize_indexing_failures(3, 0, 3, &["a.png: boom".to_owned()]).unwrap_err();
+
+        assert!(error.to_string().contains("索引失败"));
+        assert!(error.to_string().contains("a.png: boom"));
+    }
+
+    #[test]
+    fn summarize_indexing_failures_returns_warning_when_partial_success_exists() {
+        let warning =
+            super::summarize_indexing_failures(5, 2, 3, &["a.png: boom".to_owned()]).unwrap();
+
+        assert!(warning.unwrap().contains("处理失败"));
+    }
 }

@@ -18,6 +18,7 @@ function puppyFind() {
         searching: false,
         message: '',
         error: '',
+        indexError: '',
         pollHandle: null,
         showSettings: false,
 
@@ -88,6 +89,7 @@ function puppyFind() {
                         current_file: null,
                         error: null
                     };
+                    this.indexError = '';
                     messages.push('配置已保存，索引上下文已重置，请重新建索引。');
                 } else if (!silent) {
                     messages.push('配置已保存。');
@@ -112,6 +114,7 @@ function puppyFind() {
 
             this.message = '';
             this.error = '';
+            this.indexError = '';
 
             try {
                 const response = await fetch('/api/index', {
@@ -121,6 +124,7 @@ function puppyFind() {
                 if (!response.ok) {
                     throw new Error(data.error || data.message || '启动索引失败');
                 }
+                this.message = data.message || '索引任务已启动。';
                 await this.fetchIndexStatus();
             } catch (error) {
                 this.error = error.message;
@@ -132,6 +136,7 @@ function puppyFind() {
                 const response = await fetch('/api/index/status');
                 const data = await this.parseJson(response);
                 this.indexStatus = data;
+                this.indexError = data.error || '';
             } catch (error) {
                 this.error = error.message;
             }
