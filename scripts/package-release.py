@@ -88,7 +88,6 @@ def build_bundle(args: argparse.Namespace) -> Path:
     model_dir = config_root / "model"
     model_dir.mkdir()
     (config_root / "log").mkdir()
-    (bundle_root / "materials").mkdir()
 
     if args.flavor == "model":
         if not args.model_source_dir:
@@ -113,15 +112,6 @@ def build_bundle(args: argparse.Namespace) -> Path:
             "  ./config/model/visual.onnx\n"
             "  ./config/model/vocab.txt\n",
         )
-
-    write_text(
-        config_root / "README.txt",
-        "Runtime configuration is generated automatically on first launch.\n"
-        "Files and folders in this directory:\n"
-        "  ./.env          generated local configuration\n"
-        "  ./model/        local model bundle\n"
-        "  ./log/          application log files\n",
-    )
 
     if args.platform == "windows":
         archive_path = output_root / f"{bundle_name}.zip"
