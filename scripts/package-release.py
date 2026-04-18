@@ -44,6 +44,7 @@ def render_default_env(config_dir: str, omni_device: str) -> str:
         'DB_PATH="./puppy_find.db"\n'
         f'MODEL_PATH="./{config_dir}/model"\n'
         f'OMNI_DEVICE="{omni_device}"\n'
+        'OMNI_PROVIDER_POLICY="interactive"\n'
         "OMNI_INTRA_THREADS=auto\n"
         "OMNI_FGCLIP_MAX_PATCHES=256\n"
         'HOST="127.0.0.1"\n'
@@ -65,8 +66,14 @@ def copy_tree_contents(source: Path, destination: Path) -> None:
 
 
 def copy_runtime_libraries(binary: Path, destination: Path, platform: str) -> None:
+    if platform == "windows":
+        directml = binary.parent / "DirectML.dll"
+        if not directml.is_file():
+            fail(f"runtime library not found: {directml}")
+        shutil.copy2(directml, destination / directml.name)
+        return
+
     patterns = {
-        "windows": ("*.dll",),
         "linux": ("*.so", "*.so.*"),
         "macos": ("*.dylib",),
     }[platform]
@@ -98,6 +105,9 @@ def build_bundle(args: argparse.Namespace) -> Path:
     binary = Path(args.binary_path).resolve()
     if not binary.is_file():
         fail(f"binary not found: {binary}")
+
+    if args.platform == "windows" and args.skip_runtime_libs:
+        fail("windows bundles must include DirectML.dll; --skip-runtime-libs is not supported")
 
     output_root = Path(args.output_dir).resolve()
     output_root.mkdir(parents=True, exist_ok=True)

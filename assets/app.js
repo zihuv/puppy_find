@@ -4,6 +4,9 @@ function puppyFind() {
             model_path: '',
             asset_dir: ''
         },
+        runtimeStatus: {
+            snapshot: null
+        },
         query: '',
         results: [],
         indexStatus: {
@@ -25,6 +28,7 @@ function puppyFind() {
         async init() {
             await this.loadSettings();
             await this.fetchIndexStatus();
+            await this.fetchRuntimeStatus();
             this.pollHandle = window.setInterval(() => {
                 this.fetchIndexStatus();
             }, 1000);
@@ -97,6 +101,7 @@ function puppyFind() {
                 if (messages.length) {
                     this.message = messages.join(' ');
                 }
+                await this.fetchRuntimeStatus();
                 return true;
             } catch (error) {
                 this.error = error.message;
@@ -126,6 +131,7 @@ function puppyFind() {
                 }
                 this.message = data.message || '索引任务已启动。';
                 await this.fetchIndexStatus();
+                await this.fetchRuntimeStatus();
             } catch (error) {
                 this.error = error.message;
             }
@@ -137,6 +143,71 @@ function puppyFind() {
                 const data = await this.parseJson(response);
                 this.indexStatus = data;
                 this.indexError = data.error || '';
+            } catch (error) {
+                this.error = error.message;
+            }
+        },
+
+        async fetchRuntimeStatus() {
+            try {
+                const response = await fetch('/api/runtime');
+                const data = await this.parseJson(response);
+                this.runtimeStatus.snapshot = data.snapshot || null;
+            } catch (error) {
+                this.runtimeStatus.snapshot = null;
+            }
+        },
+
+        async openPath(path) {
+            if (!path || !path.trim()) {
+                this.error = '请先填写路径';
+                return;
+            }
+
+            this.error = '';
+
+            try {
+                const response = await fetch('/api/open-path', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        path
+                    })
+                });
+                const data = await this.parseJson(response);
+                if (!response.ok) {
+                    throw new Error(data.error || '打开路径失败');
+                }
+                this.message = data.message || '已打开路径';
+            } catch (error) {
+                this.error = error.message;
+            }
+        },
+
+        async chooseDirectory(field) {
+            const currentPath = this.form[field] || '';
+            this.error = '';
+
+            try {
+                const response = await fetch('/api/pick-directory', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        path: currentPath
+                    })
+                });
+                const data = await this.parseJson(response);
+                if (!response.ok) {
+                    throw new Error(data.error || '选择目录失败');
+                }
+                if (data.canceled) {
+                    return;
+                }
+                this.form[field] = data.path || '';
             } catch (error) {
                 this.error = error.message;
             }
@@ -174,6 +245,7 @@ function puppyFind() {
             } catch (error) {
                 this.error = error.message;
             } finally {
+                await this.fetchRuntimeStatus();
                 this.searching = false;
             }
         },
@@ -186,6 +258,31 @@ function puppyFind() {
                 return `${this.indexStatus.processed || this.indexStatus.indexed}/${this.indexStatus.total || this.indexStatus.indexed}`;
             }
             return '未开始';
+        },
+
+        runtimeDeviceText() {
+            const summary = this.runtimeStatus.snapshot?.summary;
+            const provider = summary?.effective_provider;
+            if (provider) {
+                return this.isGpuProvider(provider) ? 'gpu' : 'cpu';
+            }
+
+            if (summary?.mode === 'cpu_only') {
+                return 'cpu';
+            }
+
+            if (summary?.mode === 'gpu_enabled' || summary?.mode === 'mixed') {
+                return 'gpu';
+            }
+
+            return '';
+        },
+
+        isGpuProvider(provider) {
+            return provider === 'cuda'
+                || provider === 'direct_ml'
+                || provider === 'core_ml'
+                || provider === 'tensor_rt';
         },
 
         async parseJson(response) {

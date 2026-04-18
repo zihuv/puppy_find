@@ -176,6 +176,16 @@ img {
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
+.path-input-row {
+    display: flex;
+    gap: 12px;
+}
+
+.path-input-row input {
+    flex: 1;
+    min-width: 0;
+}
+
 .actions,
 .search-row {
     display: flex;
@@ -231,6 +241,11 @@ button.primary {
 
 .icon-button {
     padding: 8px 12px;
+}
+
+.path-button {
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 button.primary:hover:not(:disabled) {
@@ -292,6 +307,11 @@ button:disabled {
     padding: 12px;
 }
 
+.card-actions {
+    display: flex;
+    margin-top: 12px;
+}
+
 .card-row {
     display: flex;
     align-items: center;
@@ -349,8 +369,33 @@ button:disabled {
     margin-bottom: 18px;
 }
 
+.runtime-summary {
+    margin: 4px 0 18px;
+    padding-top: 12px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.runtime-summary-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 0;
+}
+
+.runtime-summary-row span {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.runtime-summary-row strong {
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
 @media (max-width: 720px) {
     .actions,
+    .path-input-row,
     .search-row,
     .section-head,
     .status-row,
@@ -367,6 +412,12 @@ button:disabled {
     .head-progress {
         width: 100%;
         justify-content: center;
+    }
+
+    .runtime-summary-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
     }
 
     .badge,

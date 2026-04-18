@@ -4,8 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result, anyhow, bail};
-use omni_search::{OmniSearch, OmniSearchBuilder, RuntimeDevice, probe_local_model_dir};
-use tracing::warn;
+use omni_search::{
+    OmniSearch, OmniSearchBuilder, ProviderPolicy, RuntimeDevice, RuntimeSnapshot,
+    probe_local_model_dir,
+};
 use walkdir::WalkDir;
 
 use crate::config::{AppSettings, OmniIntraThreads};
@@ -25,6 +27,7 @@ struct ModelSlot {
 struct ModelCacheKey {
     model_dir: PathBuf,
     omni_device: RuntimeDevice,
+    omni_provider_policy: ProviderPolicy,
     omni_intra_threads: OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 }
@@ -67,6 +70,18 @@ impl ModelManager {
         slot.model_key = None;
     }
 
+    pub fn runtime_snapshot(
+        &self,
+        workspace_dir: &Path,
+        settings: &AppSettings,
+    ) -> Result<RuntimeSnapshot> {
+        self.with_model(
+            workspace_dir,
+            settings,
+            |model| Ok(model.runtime_snapshot()),
+        )
+    }
+
     fn with_model<T>(
         &self,
         workspace_dir: &Path,
@@ -78,44 +93,20 @@ impl ModelManager {
         let model_key = ModelCacheKey {
             model_dir: normalized.clone(),
             omni_device: settings.omni_device,
+            omni_provider_policy: settings.omni_provider_policy,
             omni_intra_threads: settings.omni_intra_threads.clone(),
             omni_fgclip_max_patches: settings.omni_fgclip_max_patches,
         };
 
-        match self.with_cached_model(
+        self.with_cached_model(
             &model_key,
             &normalized,
             settings.omni_device,
+            settings.omni_provider_policy,
             &settings.omni_intra_threads,
             settings.omni_fgclip_max_patches,
             &f,
-        ) {
-            Ok(value) => Ok(value),
-            Err(error) if should_fallback_to_cpu(settings.omni_device, &error) => {
-                warn!(
-                    "runtime device {} failed for model {}, retrying on cpu: {error:#}",
-                    settings.omni_device,
-                    normalized.display()
-                );
-                self.clear();
-                self.with_cached_model(
-                    &model_key,
-                    &normalized,
-                    RuntimeDevice::Cpu,
-                    &settings.omni_intra_threads,
-                    settings.omni_fgclip_max_patches,
-                    &f,
-                )
-                .with_context(|| {
-                    format!(
-                        "runtime device {} failed and cpu fallback also failed for {}",
-                        settings.omni_device,
-                        normalized.display()
-                    )
-                })
-            }
-            Err(error) => Err(error),
-        }
+        )
     }
 
     fn with_cached_model<T>(
@@ -123,6 +114,7 @@ impl ModelManager {
         model_key: &ModelCacheKey,
         model_dir: &Path,
         build_device: RuntimeDevice,
+        provider_policy: ProviderPolicy,
         omni_intra_threads: &OmniIntraThreads,
         omni_fgclip_max_patches: usize,
         f: &impl Fn(&OmniSearch) -> Result<T>,
@@ -136,6 +128,7 @@ impl ModelManager {
             let model = build_model(
                 model_dir,
                 build_device,
+                provider_policy,
                 omni_intra_threads,
                 omni_fgclip_max_patches,
             )?;
@@ -154,6 +147,7 @@ pub fn validate_model_dir(
     workspace_dir: &Path,
     value: &str,
     omni_device: RuntimeDevice,
+    omni_provider_policy: ProviderPolicy,
     omni_intra_threads: &OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 ) -> Result<String> {
@@ -171,6 +165,7 @@ pub fn validate_model_dir(
     ensure_model_loadable(
         &probe.normalized_path,
         omni_device,
+        omni_provider_policy,
         omni_intra_threads,
         omni_fgclip_max_patches,
     )?;
@@ -252,10 +247,12 @@ fn trim_path_input<'a>(value: &'a str, label: &str) -> Result<&'a str> {
 fn apply_runtime_overrides(
     builder: &mut OmniSearchBuilder,
     omni_device: RuntimeDevice,
+    omni_provider_policy: ProviderPolicy,
     omni_intra_threads: &OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 ) {
     builder.device(omni_device);
+    builder.provider_policy(omni_provider_policy);
     builder.intra_threads(omni_intra_threads.resolved());
     builder.fgclip_max_patches(omni_fgclip_max_patches);
 }
@@ -263,12 +260,14 @@ fn apply_runtime_overrides(
 fn ensure_model_loadable(
     model_dir: &Path,
     omni_device: RuntimeDevice,
+    omni_provider_policy: ProviderPolicy,
     omni_intra_threads: &OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 ) -> Result<()> {
     let _ = build_model(
         model_dir,
         omni_device,
+        omni_provider_policy,
         omni_intra_threads,
         omni_fgclip_max_patches,
     )?;
@@ -278,6 +277,7 @@ fn ensure_model_loadable(
 fn build_model(
     model_dir: &Path,
     omni_device: RuntimeDevice,
+    omni_provider_policy: ProviderPolicy,
     omni_intra_threads: &OmniIntraThreads,
     omni_fgclip_max_patches: usize,
 ) -> Result<OmniSearch> {
@@ -286,24 +286,13 @@ fn build_model(
     apply_runtime_overrides(
         &mut builder,
         omni_device,
+        omni_provider_policy,
         omni_intra_threads,
         omni_fgclip_max_patches,
     );
     builder
         .build()
         .with_context(|| format!("failed to load model bundle from {}", model_dir.display()))
-}
-
-fn should_fallback_to_cpu(device: RuntimeDevice, error: &anyhow::Error) -> bool {
-    if matches!(device, RuntimeDevice::Cpu) {
-        return false;
-    }
-
-    let message = error.to_string().to_ascii_lowercase();
-    message.contains("dmlexecutionprovider")
-        || message.contains("directml")
-        || message.contains("coremlexecutionprovider")
-        || message.contains("coreml")
 }
 
 fn fingerprint_model_dir(model_dir: &Path, omni_fgclip_max_patches: usize) -> Result<String> {
@@ -405,9 +394,6 @@ mod tests {
     use std::thread::sleep;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use anyhow::anyhow;
-    use omni_search::RuntimeDevice;
-
     use super::fingerprint_model_dir;
 
     #[test]
@@ -439,27 +425,6 @@ mod tests {
         assert_ne!(left, right);
 
         let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn cpu_runtime_never_falls_back() {
-        let error = anyhow!("onnx runtime error: DirectML failure");
-        assert!(!super::should_fallback_to_cpu(RuntimeDevice::Cpu, &error));
-    }
-
-    #[test]
-    fn dml_errors_trigger_cpu_fallback() {
-        let error = anyhow!(
-            "failed to embed text: onnx runtime error: DmlExecutionProvider LayerNormalization"
-        );
-        assert!(super::should_fallback_to_cpu(RuntimeDevice::Auto, &error));
-        assert!(super::should_fallback_to_cpu(RuntimeDevice::Gpu, &error));
-    }
-
-    #[test]
-    fn non_accelerator_errors_do_not_trigger_cpu_fallback() {
-        let error = anyhow!("failed to read image bytes");
-        assert!(!super::should_fallback_to_cpu(RuntimeDevice::Auto, &error));
     }
 
     fn unique_test_dir() -> PathBuf {

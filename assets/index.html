@@ -48,6 +48,9 @@
                             <span x-text="item.score.toFixed(4)"></span>
                         </div>
                         <p class="path" x-text="item.path"></p>
+                        <div class="card-actions">
+                            <button class="ghost path-button" type="button" @click="openPath(item.path)">打开位置</button>
+                        </div>
                     </div>
                 </article>
             </template>
@@ -65,13 +68,26 @@
 
                 <label class="field">
                     <span>MODEL_PATH</span>
-                    <input x-model.trim="form.model_path" type="text" placeholder="./config/model">
+                    <div class="path-input-row">
+                        <input x-model.trim="form.model_path" type="text" placeholder="./config/model">
+                        <button class="ghost path-button" type="button" @click="chooseDirectory('model_path')">选择目录</button>
+                    </div>
                 </label>
 
                 <label class="field">
                     <span>素材目录</span>
-                    <input x-model.trim="form.asset_dir" type="text" placeholder="./materials">
+                    <div class="path-input-row">
+                        <input x-model.trim="form.asset_dir" type="text" placeholder="./materials">
+                        <button class="ghost path-button" type="button" @click="chooseDirectory('asset_dir')">选择目录</button>
+                    </div>
                 </label>
+
+                <section class="runtime-summary" x-show="runtimeDeviceText()">
+                    <div class="runtime-summary-row">
+                        <span>推理设备</span>
+                        <strong x-text="runtimeDeviceText()"></strong>
+                    </div>
+                </section>
 
                 <div class="actions">
                     <button @click="saveSettings()" :disabled="saving || indexStatus.running">

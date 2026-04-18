@@ -38,8 +38,9 @@ async fn main() -> anyhow::Result<()> {
         config::resolve_path(&workspace_dir, &settings.log_dir).display()
     );
     info!(
-        "omni runtime: device={}, intra_threads={} (resolved={}), fgclip_max_patches={}",
+        "omni runtime: device={}, provider_policy={}, intra_threads={} (resolved={}), fgclip_max_patches={}",
         settings.omni_device,
+        settings.omni_provider_policy,
         settings.omni_intra_threads,
         settings.resolved_omni_intra_threads(),
         settings.omni_fgclip_max_patches

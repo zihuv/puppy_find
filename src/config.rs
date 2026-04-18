@@ -5,7 +5,9 @@ use std::path::{Component, Path, PathBuf};
 use std::{fmt, str::FromStr};
 
 use anyhow::{Context, Result, bail};
-use omni_search::{RuntimeDevice, default_intra_threads as omni_default_intra_threads};
+use omni_search::{
+    ProviderPolicy, RuntimeDevice, default_intra_threads as omni_default_intra_threads,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const CONFIG_DIR_NAME: &str = "config";
@@ -17,6 +19,7 @@ const KEY_DB_PATH: &str = "DB_PATH";
 const KEY_MODEL_PATH: &str = "MODEL_PATH";
 const KEY_MODEL_DIR_LEGACY: &str = "MODEL_DIR";
 const KEY_OMNI_DEVICE: &str = "OMNI_DEVICE";
+const KEY_OMNI_PROVIDER_POLICY: &str = "OMNI_PROVIDER_POLICY";
 const KEY_OMNI_INTRA_THREADS: &str = "OMNI_INTRA_THREADS";
 const KEY_OMNI_FGCLIP_MAX_PATCHES: &str = "OMNI_FGCLIP_MAX_PATCHES";
 const KEY_HOST: &str = "HOST";
@@ -121,6 +124,8 @@ pub struct AppSettings {
     pub model_path: String,
     #[serde(default = "default_omni_device")]
     pub omni_device: RuntimeDevice,
+    #[serde(default = "default_omni_provider_policy")]
+    pub omni_provider_policy: ProviderPolicy,
     #[serde(default = "default_omni_intra_threads")]
     pub omni_intra_threads: OmniIntraThreads,
     #[serde(default = "default_omni_fgclip_max_patches")]
@@ -133,6 +138,10 @@ pub struct AppSettings {
 
 fn default_omni_device() -> RuntimeDevice {
     RuntimeDevice::Auto
+}
+
+fn default_omni_provider_policy() -> ProviderPolicy {
+    ProviderPolicy::Interactive
 }
 
 fn default_omni_intra_threads() -> OmniIntraThreads {
@@ -155,6 +164,7 @@ impl AppSettings {
             db_path: "./config/puppy_find.db".to_owned(),
             model_path: DEFAULT_MODEL_DIR.to_owned(),
             omni_device: default_omni_device(),
+            omni_provider_policy: default_omni_provider_policy(),
             omni_intra_threads: default_omni_intra_threads(),
             omni_fgclip_max_patches: default_omni_fgclip_max_patches(),
             host: "127.0.0.1".to_owned(),
@@ -194,6 +204,10 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
             .get(KEY_OMNI_DEVICE)
             .and_then(|value| parse_runtime_device(value).ok())
             .unwrap_or(defaults.omni_device),
+        omni_provider_policy: parsed
+            .get(KEY_OMNI_PROVIDER_POLICY)
+            .and_then(|value| parse_provider_policy(value).ok())
+            .unwrap_or(defaults.omni_provider_policy),
         omni_intra_threads: parsed
             .get(KEY_OMNI_INTRA_THREADS)
             .and_then(|value| parse_omni_intra_threads(value).ok())
@@ -228,6 +242,7 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
         KEY_DB_PATH,
         KEY_MODEL_PATH,
         KEY_OMNI_DEVICE,
+        KEY_OMNI_PROVIDER_POLICY,
         KEY_OMNI_INTRA_THREADS,
         KEY_OMNI_FGCLIP_MAX_PATCHES,
         KEY_HOST,
@@ -248,6 +263,9 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
     let invalid_omni_device = parsed
         .get(KEY_OMNI_DEVICE)
         .is_some_and(|value| parse_runtime_device(value).is_err());
+    let invalid_omni_provider_policy = parsed
+        .get(KEY_OMNI_PROVIDER_POLICY)
+        .is_some_and(|value| parse_provider_policy(value).is_err());
     let invalid_omni_intra_threads = parsed
         .get(KEY_OMNI_INTRA_THREADS)
         .is_some_and(|value| parse_omni_intra_threads(value).is_err());
@@ -268,6 +286,7 @@ pub fn load_or_create(workspace_dir: &Path) -> Result<AppSettings> {
         || invalid_host
         || invalid_port
         || invalid_omni_device
+        || invalid_omni_provider_policy
         || invalid_omni_intra_threads
         || invalid_omni_fgclip_max_patches
     {
@@ -340,6 +359,15 @@ fn parse_runtime_device(value: &str) -> Result<RuntimeDevice> {
         "cpu" => Ok(RuntimeDevice::Cpu),
         "gpu" => Ok(RuntimeDevice::Gpu),
         _ => bail!("OMNI_DEVICE 必须是 auto、cpu 或 gpu"),
+    }
+}
+
+fn parse_provider_policy(value: &str) -> Result<ProviderPolicy> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(ProviderPolicy::Auto),
+        "interactive" => Ok(ProviderPolicy::Interactive),
+        "service" => Ok(ProviderPolicy::Service),
+        _ => bail!("OMNI_PROVIDER_POLICY 必须是 auto、interactive 或 service"),
     }
 }
 
@@ -452,6 +480,7 @@ fn render_env_file(existing_text: &str, settings: &AppSettings) -> String {
         KEY_DB_PATH,
         KEY_MODEL_PATH,
         KEY_OMNI_DEVICE,
+        KEY_OMNI_PROVIDER_POLICY,
         KEY_OMNI_INTRA_THREADS,
         KEY_OMNI_FGCLIP_MAX_PATCHES,
         KEY_HOST,
@@ -479,6 +508,10 @@ fn render_known_line(key: &str, settings: &AppSettings) -> Option<String> {
         KEY_OMNI_DEVICE => Some(render_string_assignment(
             KEY_OMNI_DEVICE,
             &settings.omni_device.to_string(),
+        )),
+        KEY_OMNI_PROVIDER_POLICY => Some(render_string_assignment(
+            KEY_OMNI_PROVIDER_POLICY,
+            &settings.omni_provider_policy.to_string(),
         )),
         KEY_OMNI_INTRA_THREADS => Some(format!(
             "{KEY_OMNI_INTRA_THREADS}={}",
@@ -581,7 +614,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use omni_search::RuntimeDevice;
+    use omni_search::{ProviderPolicy, RuntimeDevice};
 
     use super::{OmniIntraThreads, env_path, load_or_create, resolve_path, save, validate_db_path};
 
@@ -619,6 +652,7 @@ mod tests {
         assert_eq!(settings.model_path, "./config/model");
         assert_eq!(settings.log_dir, "./config/log");
         assert_eq!(settings.omni_device, RuntimeDevice::Auto);
+        assert_eq!(settings.omni_provider_policy, ProviderPolicy::Interactive);
         assert_eq!(settings.omni_intra_threads, OmniIntraThreads::Auto);
         assert!(workspace_dir.join("config").join("model").is_dir());
         assert!(workspace_dir.join("config").join("log").is_dir());
@@ -630,6 +664,7 @@ mod tests {
         assert!(env_text.contains("DB_PATH=\"./config/puppy_find.db\""));
         assert!(env_text.contains("MODEL_PATH=\"./config/model\""));
         assert!(env_text.contains("OMNI_DEVICE=\"auto\""));
+        assert!(env_text.contains("OMNI_PROVIDER_POLICY=\"interactive\""));
         assert!(env_text.contains("LOG_DIR=\"./config/log\""));
 
         let _ = fs::remove_dir_all(&workspace_dir);
@@ -641,7 +676,7 @@ mod tests {
         fs::create_dir_all(&workspace_dir).unwrap();
         fs::write(
             workspace_dir.join(".env"),
-            "DB_PATH=\"./legacy.db\"\nMODEL_PATH=\"./legacy-model\"\nOMNI_DEVICE=\"gpu\"\nOMNI_INTRA_THREADS=auto\nOMNI_FGCLIP_MAX_PATCHES=576\nHOST=\"0.0.0.0\"\nPORT=4000\nASSET_DIR=\"./legacy-assets\"\nLOG_DIR=\"./legacy-log\"\n",
+            "DB_PATH=\"./legacy.db\"\nMODEL_PATH=\"./legacy-model\"\nOMNI_DEVICE=\"gpu\"\nOMNI_PROVIDER_POLICY=\"service\"\nOMNI_INTRA_THREADS=auto\nOMNI_FGCLIP_MAX_PATCHES=576\nHOST=\"0.0.0.0\"\nPORT=4000\nASSET_DIR=\"./legacy-assets\"\nLOG_DIR=\"./legacy-log\"\n",
         )
         .unwrap();
 
@@ -651,12 +686,14 @@ mod tests {
         assert_eq!(settings.db_path, "./legacy.db");
         assert_eq!(settings.model_path, "./legacy-model");
         assert_eq!(settings.omni_device, RuntimeDevice::Gpu);
+        assert_eq!(settings.omni_provider_policy, ProviderPolicy::Service);
         assert_eq!(settings.omni_intra_threads, OmniIntraThreads::Auto);
         assert_eq!(settings.asset_dir, "./legacy-assets");
         assert_eq!(settings.log_dir, "./legacy-log");
         assert_eq!(env_path(&workspace_dir), workspace_dir.join(".env"));
         assert!(root_env.contains("DB_PATH=\"./legacy.db\""));
         assert!(root_env.contains("OMNI_DEVICE=\"gpu\""));
+        assert!(root_env.contains("OMNI_PROVIDER_POLICY=\"service\""));
         assert!(root_env.contains("OMNI_INTRA_THREADS=auto"));
         assert!(root_env.contains("LOG_DIR=\"./legacy-log\""));
         assert!(!workspace_dir.join("config").join(".env").exists());

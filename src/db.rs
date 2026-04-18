@@ -383,9 +383,7 @@ mod tests {
 
     #[test]
     fn init_creates_database_file_and_missing_parent_directories() {
-        let db_path = unique_test_dir()
-            .join("config")
-            .join("puppy_find.db");
+        let db_path = unique_test_dir().join("config").join("puppy_find.db");
         assert!(!db_path.exists());
         assert!(
             !db_path

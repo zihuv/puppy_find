@@ -1,3 +1,5 @@
+use std::path::{Path as FsPath, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -27,6 +29,9 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(root))
         .route("/assets/{*path}", get(asset))
         .route("/api/settings", get(get_settings).post(save_settings))
+        .route("/api/runtime", get(get_runtime_status))
+        .route("/api/pick-directory", post(pick_directory))
+        .route("/api/open-path", post(open_path))
         .route("/api/index", post(start_index))
         .route("/api/index/status", get(index_status))
         .route("/api/search", post(search_images))
@@ -49,8 +54,16 @@ async fn get_settings(State(state): State<Arc<AppState>>) -> Json<SettingsView> 
     Json(SettingsView {
         model_path: settings.model_path,
         asset_dir: settings.asset_dir,
+        omni_device: settings.omni_device.to_string(),
+        omni_provider_policy: settings.omni_provider_policy.to_string(),
+        omni_fgclip_max_patches: settings.omni_fgclip_max_patches,
         needs_setup,
     })
+}
+
+async fn get_runtime_status(State(state): State<Arc<AppState>>) -> Json<RuntimeStatusResponse> {
+    let settings = state.settings();
+    Json(build_runtime_status_response(state.as_ref(), &settings))
 }
 
 async fn save_settings(
@@ -69,6 +82,7 @@ async fn save_settings(
         workspace_dir,
         &payload.model_path,
         old_settings.omni_device,
+        old_settings.omni_provider_policy,
         &old_settings.omni_intra_threads,
         old_settings.omni_fgclip_max_patches,
     )
@@ -80,6 +94,7 @@ async fn save_settings(
         db_path: old_settings.db_path.clone(),
         model_path,
         omni_device: old_settings.omni_device,
+        omni_provider_policy: old_settings.omni_provider_policy,
         omni_intra_threads: old_settings.omni_intra_threads.clone(),
         omni_fgclip_max_patches: old_settings.omni_fgclip_max_patches,
         host: old_settings.host.clone(),
@@ -118,7 +133,59 @@ async fn save_settings(
     Ok(Json(SettingsResponse {
         model_path: new_settings.model_path,
         asset_dir: new_settings.asset_dir,
+        omni_device: new_settings.omni_device.to_string(),
+        omni_provider_policy: new_settings.omni_provider_policy.to_string(),
+        omni_fgclip_max_patches: new_settings.omni_fgclip_max_patches,
         index_cleared: index_data_changed,
+    }))
+}
+
+async fn open_path(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<OpenPathRequest>,
+) -> Result<Json<MessageResponse>, ApiError> {
+    let target_path = resolve_requested_path(state.workspace_dir(), &payload.path)
+        .map_err(ApiError::bad_request)?;
+    let target_kind = inspect_open_target(&target_path).map_err(ApiError::bad_request)?;
+    let display_path = target_path.display().to_string();
+
+    tokio::task::spawn_blocking(move || open_in_file_manager(&target_path, target_kind))
+        .await
+        .context("open path task join failed")
+        .map_err(ApiError::internal)?
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(MessageResponse {
+        message: format!("已打开路径: {display_path}"),
+    }))
+}
+
+async fn pick_directory(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<PickDirectoryRequest>,
+) -> Result<Json<PickDirectoryResponse>, ApiError> {
+    let initial_dir = dialog_initial_directory(state.workspace_dir(), payload.path.as_deref());
+    let workspace_dir = state.workspace_dir().to_path_buf();
+
+    let selected = tokio::task::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new();
+        dialog = dialog.set_directory(initial_dir);
+        dialog.pick_folder()
+    })
+    .await
+    .context("pick directory task join failed")
+    .map_err(ApiError::internal)?;
+
+    let Some(selected) = selected else {
+        return Ok(Json(PickDirectoryResponse {
+            path: None,
+            canceled: true,
+        }));
+    };
+
+    Ok(Json(PickDirectoryResponse {
+        path: Some(display_selected_path(&workspace_dir, &selected)),
+        canceled: false,
     }))
 }
 
@@ -134,6 +201,7 @@ async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResp
         state.workspace_dir(),
         &settings.model_path,
         settings.omni_device,
+        settings.omni_provider_policy,
         &settings.omni_intra_threads,
         settings.omni_fgclip_max_patches,
     )
@@ -255,6 +323,153 @@ fn resolved_path_key(workspace_dir: &std::path::Path, value: &str) -> String {
     model::path_to_string(&config::resolve_path(workspace_dir, value))
 }
 
+fn resolve_requested_path(workspace_dir: &FsPath, value: &str) -> Result<PathBuf> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("路径不能为空"));
+    }
+
+    Ok(config::resolve_path(workspace_dir, trimmed))
+}
+
+fn dialog_initial_directory(workspace_dir: &FsPath, value: Option<&str>) -> PathBuf {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return workspace_dir.to_path_buf();
+    };
+
+    let mut candidate = config::resolve_path(workspace_dir, value);
+    loop {
+        if candidate.is_dir() {
+            return candidate;
+        }
+
+        if candidate.exists() {
+            if let Some(parent) = candidate.parent() {
+                return parent.to_path_buf();
+            }
+            return workspace_dir.to_path_buf();
+        }
+
+        let Some(parent) = candidate.parent() else {
+            return workspace_dir.to_path_buf();
+        };
+        if parent == candidate {
+            return workspace_dir.to_path_buf();
+        }
+        candidate = parent.to_path_buf();
+    }
+}
+
+fn display_selected_path(workspace_dir: &FsPath, selected: &FsPath) -> String {
+    if let Ok(relative) = selected.strip_prefix(workspace_dir) {
+        if relative.as_os_str().is_empty() {
+            return ".".to_owned();
+        }
+
+        return format!("./{}", model::path_to_string(relative));
+    }
+
+    model::path_to_string(selected)
+}
+
+fn inspect_open_target(path: &FsPath) -> Result<OpenTargetKind> {
+    let metadata =
+        std::fs::metadata(path).with_context(|| format!("路径不存在: {}", path.display()))?;
+
+    if metadata.is_dir() {
+        return Ok(OpenTargetKind::Directory);
+    }
+
+    if metadata.is_file() {
+        return Ok(OpenTargetKind::File);
+    }
+
+    Err(anyhow!("不支持打开该路径类型: {}", path.display()))
+}
+
+fn open_in_file_manager(path: &FsPath, kind: OpenTargetKind) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = Command::new("explorer.exe");
+        match kind {
+            OpenTargetKind::Directory => {
+                command.arg(windows_path_arg(path));
+            }
+            OpenTargetKind::File => {
+                command.arg(format!("/select,{}", windows_path_arg(path)));
+            }
+        }
+        command
+            .spawn()
+            .with_context(|| format!("failed to open Explorer for {}", path.display()))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = Command::new("open");
+        if matches!(kind, OpenTargetKind::File) {
+            command.arg("-R");
+        }
+        command
+            .arg(path)
+            .spawn()
+            .with_context(|| format!("failed to open Finder for {}", path.display()))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let target = match kind {
+            OpenTargetKind::Directory => path.to_path_buf(),
+            OpenTargetKind::File => path
+                .parent()
+                .map(FsPath::to_path_buf)
+                .ok_or_else(|| anyhow!("文件没有可打开的父目录: {}", path.display()))?,
+        };
+
+        Command::new("xdg-open")
+            .arg(&target)
+            .spawn()
+            .with_context(|| format!("failed to open file manager for {}", target.display()))?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err(anyhow!("当前平台暂不支持打开路径"))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_path_arg(path: &FsPath) -> String {
+    path.to_string_lossy().replace('/', "\\")
+}
+
+fn build_runtime_status_response(
+    state: &AppState,
+    settings: &AppSettings,
+) -> RuntimeStatusResponse {
+    if settings.model_path.trim().is_empty() {
+        return RuntimeStatusResponse {
+            snapshot: None,
+            error: None,
+        };
+    }
+
+    match state
+        .model_manager()
+        .runtime_snapshot(state.workspace_dir(), settings)
+    {
+        Ok(snapshot) => RuntimeStatusResponse {
+            snapshot: Some(snapshot),
+            error: None,
+        },
+        Err(error) => RuntimeStatusResponse {
+            snapshot: None,
+            error: Some(error.to_string()),
+        },
+    }
+}
+
 fn sync_runtime_model_index(
     state: &AppState,
     settings: &AppSettings,
@@ -318,9 +533,27 @@ struct SearchRequest {
     limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenPathRequest {
+    path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PickDirectoryRequest {
+    path: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct SearchResponse {
     items: Vec<search::SearchItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct PickDirectoryResponse {
+    path: Option<String>,
+    canceled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -339,6 +572,9 @@ struct SettingsPayload {
 struct SettingsResponse {
     model_path: String,
     asset_dir: String,
+    omni_device: String,
+    omni_provider_policy: String,
+    omni_fgclip_max_patches: usize,
     index_cleared: bool,
 }
 
@@ -346,7 +582,16 @@ struct SettingsResponse {
 struct SettingsView {
     model_path: String,
     asset_dir: String,
+    omni_device: String,
+    omni_provider_policy: String,
+    omni_fgclip_max_patches: usize,
     needs_setup: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeStatusResponse {
+    snapshot: Option<omni_search::RuntimeSnapshot>,
+    error: Option<String>,
 }
 
 #[derive(Debug)]
@@ -390,4 +635,97 @@ impl IntoResponse for ApiError {
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenTargetKind {
+    Directory,
+    File,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        OpenTargetKind, dialog_initial_directory, display_selected_path, inspect_open_target,
+        resolve_requested_path,
+    };
+
+    #[test]
+    fn resolve_requested_path_uses_workspace_for_relative_paths() {
+        let workspace_dir = PathBuf::from("D:/code/puppy_find");
+
+        let resolved = resolve_requested_path(&workspace_dir, "./materials/corgi").unwrap();
+
+        assert_eq!(
+            resolved,
+            PathBuf::from("D:/code/puppy_find/materials/corgi")
+        );
+    }
+
+    #[test]
+    fn resolve_requested_path_rejects_empty_input() {
+        let workspace_dir = PathBuf::from("D:/code/puppy_find");
+
+        let error = resolve_requested_path(&workspace_dir, "   ").unwrap_err();
+
+        assert!(error.to_string().contains("路径不能为空"));
+    }
+
+    #[test]
+    fn dialog_initial_directory_falls_back_to_existing_parent() {
+        let root = unique_test_dir();
+        let child_dir = root.join("materials");
+
+        fs::create_dir_all(&child_dir).unwrap();
+
+        let resolved =
+            dialog_initial_directory(&root, Some("./materials/missing/deeper/not-found"));
+
+        assert_eq!(resolved, child_dir);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn display_selected_path_prefers_workspace_relative_format() {
+        let workspace_dir = PathBuf::from("D:/code/puppy_find");
+        let selected = workspace_dir.join("materials").join("corgi");
+
+        let displayed = display_selected_path(&workspace_dir, &selected);
+
+        assert_eq!(displayed, "./materials/corgi");
+    }
+
+    #[test]
+    fn inspect_open_target_distinguishes_files_and_directories() {
+        let root = unique_test_dir();
+        let child_dir = root.join("assets");
+        let child_file = root.join("dog.png");
+
+        fs::create_dir_all(&child_dir).unwrap();
+        fs::write(&child_file, b"image").unwrap();
+
+        assert_eq!(
+            inspect_open_target(&child_dir).unwrap(),
+            OpenTargetKind::Directory
+        );
+        assert_eq!(
+            inspect_open_target(&child_file).unwrap(),
+            OpenTargetKind::File
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    fn unique_test_dir() -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("puppy_find_web_test_{timestamp}"))
+    }
 }
