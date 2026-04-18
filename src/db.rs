@@ -382,6 +382,42 @@ mod tests {
     }
 
     #[test]
+    fn init_creates_database_file_and_missing_parent_directories() {
+        let db_path = unique_test_dir()
+            .join("config")
+            .join("puppy_find.db");
+        assert!(!db_path.exists());
+        assert!(
+            !db_path
+                .parent()
+                .expect("db path should have a parent")
+                .exists()
+        );
+
+        init(&db_path).unwrap();
+
+        assert!(db_path.exists());
+        assert!(
+            db_path
+                .parent()
+                .expect("db path should have a parent")
+                .is_dir()
+        );
+
+        let _ = fs::remove_file(&db_path);
+        let wal_path = db_path.with_extension("db-wal");
+        let shm_path = db_path.with_extension("db-shm");
+        let _ = fs::remove_file(wal_path);
+        let _ = fs::remove_file(shm_path);
+        let _ = fs::remove_dir_all(
+            db_path
+                .parent()
+                .and_then(|parent| parent.parent())
+                .expect("config directory should have a parent"),
+        );
+    }
+
+    #[test]
     fn sync_index_model_signature_resets_old_vectors_when_signature_changes() {
         let db_path = unique_test_db_path();
         init(&db_path).unwrap();
@@ -466,5 +502,13 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("puppy_find_db_test_{timestamp}.sqlite3"))
+    }
+
+    fn unique_test_dir() -> std::path::PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("puppy_find_db_dir_test_{timestamp}"))
     }
 }

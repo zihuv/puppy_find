@@ -152,7 +152,7 @@ impl Default for AppSettings {
 impl AppSettings {
     pub fn defaults() -> Self {
         Self {
-            db_path: "./puppy_find.db".to_owned(),
+            db_path: "./config/puppy_find.db".to_owned(),
             model_path: DEFAULT_MODEL_DIR.to_owned(),
             omni_device: default_omni_device(),
             omni_intra_threads: default_omni_intra_threads(),
@@ -615,6 +615,7 @@ mod tests {
         let settings = load_or_create(&workspace_dir).unwrap();
         let env_text = fs::read_to_string(env_path(&workspace_dir)).unwrap();
 
+        assert_eq!(settings.db_path, "./config/puppy_find.db");
         assert_eq!(settings.model_path, "./config/model");
         assert_eq!(settings.log_dir, "./config/log");
         assert_eq!(settings.omni_device, RuntimeDevice::Auto);
@@ -626,6 +627,7 @@ mod tests {
             env_path(&workspace_dir),
             workspace_dir.join("config").join(".env")
         );
+        assert!(env_text.contains("DB_PATH=\"./config/puppy_find.db\""));
         assert!(env_text.contains("MODEL_PATH=\"./config/model\""));
         assert!(env_text.contains("OMNI_DEVICE=\"auto\""));
         assert!(env_text.contains("LOG_DIR=\"./config/log\""));
