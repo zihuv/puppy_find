@@ -2,15 +2,11 @@
 
 文搜图
 
-# 未来方向
+## 未来方向
 
 - [ ] 图搜图
 - [ ] 文搜视频
 
-# 声明
+## 致谢
 
-本项目永久开源免费，严禁商业用途
-
-# 感谢
-
-- 文搜图主要依赖 [Chinese-CLIP](https://github.com/OFA-Sys/Chinese-CLIP) 
+- 文搜图模型主要依赖 [Chinese-CLIP](https://github.com/OFA-Sys/Chinese-CLIP) 
