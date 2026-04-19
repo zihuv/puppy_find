@@ -116,36 +116,18 @@ jobs:
         include:
           - runner: windows-latest
             platform: windows
-            package_id: windows-x64-cpu-lean
-            binary_name: puppy_find.exe
-            flavor: nomodel
-            include_model: false
-            omni_device: cpu
-            skip_runtime_libs: true
-          - runner: windows-latest
-            platform: windows
-            package_id: windows-x64-cpu-lean
-            binary_name: puppy_find.exe
-            flavor: model
-            include_model: true
-            omni_device: cpu
-            skip_runtime_libs: true
-          - runner: windows-latest
-            platform: windows
-            package_id: windows-x64-gpu-directml
+            package_id: windows-x64
             binary_name: puppy_find.exe
             flavor: nomodel
             include_model: false
             omni_device: auto
-            skip_runtime_libs: false
           - runner: windows-latest
             platform: windows
-            package_id: windows-x64-gpu-directml
+            package_id: windows-x64
             binary_name: puppy_find.exe
             flavor: model
             include_model: true
             omni_device: auto
-            skip_runtime_libs: false
           - runner: ubuntu-24.04
             platform: linux
             package_id: linux-x64
@@ -153,7 +135,6 @@ jobs:
             flavor: nomodel
             include_model: false
             omni_device: auto
-            skip_runtime_libs: false
           - runner: ubuntu-24.04
             platform: linux
             package_id: linux-x64
@@ -161,7 +142,6 @@ jobs:
             flavor: model
             include_model: true
             omni_device: auto
-            skip_runtime_libs: false
           - runner: macos-15
             platform: macos
             package_id: macos-arm64
@@ -169,7 +149,6 @@ jobs:
             flavor: nomodel
             include_model: false
             omni_device: auto
-            skip_runtime_libs: false
           - runner: macos-15
             platform: macos
             package_id: macos-arm64
@@ -177,7 +156,6 @@ jobs:
             flavor: model
             include_model: true
             omni_device: auto
-            skip_runtime_libs: false
 
     steps:
       - name: Checkout repository
@@ -235,10 +213,6 @@ jobs:
 
           if [ "${{ matrix.include_model }}" = "true" ]; then
             command+=(--model-source-dir "./.model-cache")
-          fi
-
-          if [ "${{ matrix.skip_runtime_libs }}" = "true" ]; then
-            command+=(--skip-runtime-libs)
           fi
 
           archive_path="$("${command[@]}")"
