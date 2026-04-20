@@ -10,6 +10,20 @@
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.0] - 2026-04-20
+
+### Added
+
+### Changed
+
 - 页面不再显示普通成功或空结果提示，开始建索引、打开路径和无搜索结果时保持静默，仅保留异常信息展示。
 - Windows 正式包重新收敛为 DirectML 路线，当前版本不再依赖额外的 CUDA / TensorRT 运行时配置。
 
