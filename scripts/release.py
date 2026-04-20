@@ -4,11 +4,20 @@ import argparse
 import re
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 PACKAGE_NAME = "puppy_find"
+CHANGELOG_CATEGORIES = (
+    "Added",
+    "Changed",
+    "Deprecated",
+    "Removed",
+    "Fixed",
+    "Security",
+)
 
 
 def fail(message: str) -> None:
@@ -38,7 +47,7 @@ def git(repo_root: Path, *args: str) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Update Cargo.toml, create a git tag, and push the release."
+        description="Update Cargo.toml, Cargo.lock, docs/CHANGELOG.md, create a git tag, and push the release."
     )
     parser.add_argument("version", help="release version, for example 0.1.1")
     parser.add_argument(
@@ -104,6 +113,62 @@ def write_lock_version(cargo_lock: Path, package_name: str, version: str) -> Non
     cargo_lock.write_text(updated, encoding="utf-8", newline="\n")
 
 
+def build_empty_unreleased_section() -> str:
+    lines = ["## [Unreleased]", ""]
+    for category in CHANGELOG_CATEGORIES:
+        lines.append(f"### {category}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def extract_unreleased_section(text: str) -> tuple[str, str, str]:
+    match = re.search(
+        r"(?ms)^## \[Unreleased\]\n(?P<body>.*?)(?=^## \[|\Z)",
+        text,
+    )
+    if not match:
+        fail("failed to find ## [Unreleased] section in docs/CHANGELOG.md")
+    return text[: match.start()], match.group("body"), text[match.end() :]
+
+
+def ensure_release_notes_exist(unreleased_body: str) -> None:
+    if not re.search(r"(?m)^- ", unreleased_body):
+        fail("docs/CHANGELOG.md has no unreleased entries to publish")
+
+
+def ensure_changelog_version_does_not_exist(changelog_text: str, version: str) -> None:
+    if re.search(rf"(?m)^## \[{re.escape(version)}\](?:\s+-\s+\d{{4}}-\d{{2}}-\d{{2}})?$", changelog_text):
+        fail(f"docs/CHANGELOG.md already contains version {version}")
+
+
+def write_changelog_version(changelog_path: Path, version: str, release_date: date) -> None:
+    text = changelog_path.read_text(encoding="utf-8")
+    ensure_changelog_version_does_not_exist(text, version)
+    before, unreleased_body, after = extract_unreleased_section(text)
+    ensure_release_notes_exist(unreleased_body)
+
+    release_notes = unreleased_body.strip()
+    if not release_notes:
+        fail("docs/CHANGELOG.md has no unreleased entries to publish")
+
+    updated = (
+        before.rstrip()
+        + "\n\n"
+        + build_empty_unreleased_section()
+        + "\n\n"
+        + f"## [{version}] - {release_date.isoformat()}\n\n"
+        + release_notes
+    )
+
+    trailing = after.lstrip("\n")
+    if trailing:
+        updated += "\n\n" + trailing
+    else:
+        updated += "\n"
+
+    changelog_path.write_text(updated, encoding="utf-8", newline="\n")
+
+
 def ensure_clean_worktree(repo_root: Path) -> None:
     status = git(repo_root, "status", "--short")
     if status:
@@ -125,8 +190,9 @@ def ensure_upstream_exists(repo_root: Path) -> None:
 
 def print_plan(version: str, no_push: bool) -> None:
     print("Release plan:")
-    print(f"- update Cargo.toml and Cargo.lock to {version}")
-    print("- git add Cargo.toml Cargo.lock")
+    print(f"- update Cargo.toml, Cargo.lock, and docs/CHANGELOG.md to {version}")
+    print("- move docs/CHANGELOG.md unreleased notes into a versioned release section")
+    print("- git add Cargo.toml Cargo.lock docs/CHANGELOG.md")
     print(f'- git commit -m "{version}"')
     print(f'- git tag -a {version} -m "{version}"')
     if not no_push:
@@ -141,6 +207,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cargo_toml = repo_root / "Cargo.toml"
     cargo_lock = repo_root / "Cargo.lock"
+    changelog = repo_root / "docs" / "CHANGELOG.md"
     current_version = read_cargo_version(cargo_toml)
     lock_version = read_lock_version(cargo_lock, PACKAGE_NAME)
 
@@ -162,8 +229,9 @@ def main() -> None:
 
     write_cargo_version(cargo_toml, version)
     write_lock_version(cargo_lock, PACKAGE_NAME, version)
+    write_changelog_version(changelog, version, date.today())
 
-    git(repo_root, "add", "Cargo.toml", "Cargo.lock")
+    git(repo_root, "add", "Cargo.toml", "Cargo.lock", "docs/CHANGELOG.md")
     git(repo_root, "commit", "-m", version)
     git(repo_root, "tag", "-a", version, "-m", version)
 
