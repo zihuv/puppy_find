@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -10,6 +11,9 @@ use walkdir::WalkDir;
 
 use crate::app_state::AppState;
 use crate::db::{self, IndexedImageSnapshot, NewImageRecord};
+
+const AVIF_BRANDS: [&[u8; 4]; 2] = [b"avif", b"avis"];
+const IMAGE_SIGNATURE_BYTES: usize = 32;
 
 pub fn spawn_indexing(state: AppState) -> JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
@@ -175,6 +179,10 @@ fn collect_image_files(image_dir: &Path) -> Result<Vec<FileEntry>> {
 }
 
 fn is_supported_image(path: &Path) -> bool {
+    has_supported_image_extension(path) && !has_avif_signature(path)
+}
+
+fn has_supported_image_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| {
@@ -184,6 +192,37 @@ fn is_supported_image(path: &Path) -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+fn has_avif_signature(path: &Path) -> bool {
+    let mut header = [0u8; IMAGE_SIGNATURE_BYTES];
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let Ok(read_len) = file.read(&mut header) else {
+        return false;
+    };
+
+    is_avif_header(&header[..read_len])
+}
+
+fn is_avif_header(header: &[u8]) -> bool {
+    if header.len() < 12 || &header[4..8] != b"ftyp" {
+        return false;
+    }
+
+    let major_brand = &header[8..12];
+    if AVIF_BRANDS.iter().any(|brand| major_brand == *brand) {
+        return true;
+    }
+
+    if header.len() < 20 {
+        return false;
+    }
+
+    header[16..]
+        .chunks_exact(4)
+        .any(|brand| AVIF_BRANDS.iter().any(|candidate| brand == *candidate))
 }
 
 struct FileEntry {
@@ -217,6 +256,10 @@ fn summarize_indexing_failures(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     #[test]
     fn summarize_indexing_failures_returns_error_when_everything_failed() {
         let error =
@@ -232,5 +275,59 @@ mod tests {
             super::summarize_indexing_failures(5, 2, 3, &["a.png: boom".to_owned()]).unwrap();
 
         assert!(warning.unwrap().contains("处理失败"));
+    }
+
+    #[test]
+    fn count_indexable_images_skips_avif_disguised_as_png() {
+        let root = unique_test_dir();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("photo.jpg"), b"plain-jpg").unwrap();
+        fs::write(root.join("fake.png"), avif_header_bytes()).unwrap();
+
+        let count = super::count_indexable_images(&root).unwrap();
+
+        assert_eq!(count, 1);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn collect_image_files_skips_avif_disguised_as_png() {
+        let root = unique_test_dir();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("photo.jpg"), b"plain-jpg").unwrap();
+        fs::write(root.join("fake.png"), avif_header_bytes()).unwrap();
+
+        let files = super::collect_image_files(&root).unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].file_name, "photo.jpg");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn is_avif_header_matches_compatible_brand() {
+        let header = [
+            0, 0, 0, 24, b'f', b't', b'y', b'p', b'm', b'i', b'f', b'1', 0, 0, 0, 0, b'a', b'v',
+            b'i', b'f',
+        ];
+
+        assert!(super::is_avif_header(&header));
+    }
+
+    fn avif_header_bytes() -> &'static [u8] {
+        &[
+            0, 0, 0, 24, b'f', b't', b'y', b'p', b'a', b'v', b'i', b'f', 0, 0, 0, 0, b'm', b'i',
+            b'f', b'1',
+        ]
+    }
+
+    fn unique_test_dir() -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("puppy_find_indexer_test_{timestamp}"))
     }
 }
