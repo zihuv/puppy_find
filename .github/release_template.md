@@ -8,9 +8,6 @@
 
 **按系统下载**
 
-Windows 说明：
-- 所有 Windows 包都内含 `DirectML` 运行库，默认 `auto`，优先走 `GPU`，失败会退回 `CPU`
-
 <div align=left>
 <table>
     <thead align=left>
