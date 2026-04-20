@@ -82,7 +82,6 @@ function puppyFind() {
                 }
                 this.form.model_path = data.model_path;
                 this.form.asset_dir = data.asset_dir;
-                const messages = [];
                 if (data.index_cleared) {
                     this.results = [];
                     this.indexStatus = {
@@ -94,12 +93,6 @@ function puppyFind() {
                         error: null
                     };
                     this.indexError = '';
-                    messages.push('配置已保存，索引上下文已重置，请重新建索引。');
-                } else if (!silent) {
-                    messages.push('配置已保存。');
-                }
-                if (messages.length) {
-                    this.message = messages.join(' ');
                 }
                 await this.fetchRuntimeStatus();
                 return true;
