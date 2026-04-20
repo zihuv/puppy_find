@@ -130,8 +130,12 @@ function puppyFind() {
             try {
                 const response = await fetch('/api/index/status');
                 const data = await this.parseJson(response);
+                const wasRunning = this.indexStatus.running;
                 this.indexStatus = data;
                 this.indexError = data.error || '';
+                if (data.running || wasRunning) {
+                    await this.fetchRuntimeStatus();
+                }
             } catch (error) {
                 this.error = error.message;
             }
@@ -248,7 +252,10 @@ function puppyFind() {
             const summary = this.runtimeStatus.snapshot?.summary;
             const provider = summary?.effective_provider;
             if (provider) {
-                return this.isGpuProvider(provider) ? 'gpu' : 'cpu';
+                const label = this.providerDeviceLabel(provider);
+                if (label) {
+                    return label;
+                }
             }
 
             if (summary?.mode === 'cpu_only') {
@@ -262,11 +269,28 @@ function puppyFind() {
             return '';
         },
 
-        isGpuProvider(provider) {
-            return provider === 'cuda'
-                || provider === 'direct_ml'
-                || provider === 'core_ml'
-                || provider === 'tensor_rt';
+        providerDeviceLabel(provider) {
+            switch (this.normalizeProviderName(provider)) {
+                case 'cpu':
+                    return 'cpu';
+                case 'cuda':
+                    return 'gpu/cuda';
+                case 'directml':
+                    return 'gpu/directml';
+                case 'coreml':
+                    return 'apple/coreml';
+                case 'tensorrt':
+                    return 'gpu/tensorrt';
+                default:
+                    return '';
+            }
+        },
+
+        normalizeProviderName(provider) {
+            return String(provider || '')
+                .trim()
+                .toLowerCase()
+                .replace(/[_\s-]+/g, '');
         },
 
         async parseJson(response) {

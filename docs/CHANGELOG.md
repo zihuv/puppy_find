@@ -19,5 +19,6 @@
 ### Fixed
 
 - 索引图片时会自动跳过 AVIF 文件内容，避免伪装成 `.png` 等扩展名的 AVIF 图片被计为处理失败。
+- 建立索引期间会同步刷新“推理设备”显示，并将设备细分为 `gpu/cuda`、`gpu/directml`、`apple/coreml`、`gpu/tensorrt` 等更具体文案。
 
 ### Security
