@@ -656,34 +656,36 @@ mod tests {
 
     #[test]
     fn resolve_requested_path_uses_workspace_for_relative_paths() {
-        let workspace_dir = PathBuf::from("D:/code/puppy_find");
+        let workspace_dir = unique_test_dir();
+        fs::create_dir_all(&workspace_dir).unwrap();
 
-        let resolved = resolve_requested_path(&workspace_dir, "./materials/corgi").unwrap();
+        let resolved = resolve_requested_path(&workspace_dir, "./images/corgi").unwrap();
 
-        assert_eq!(
-            resolved,
-            PathBuf::from("D:/code/puppy_find/materials/corgi")
-        );
+        assert_eq!(resolved, workspace_dir.join("images").join("corgi"));
+
+        let _ = fs::remove_dir_all(&workspace_dir);
     }
 
     #[test]
     fn resolve_requested_path_rejects_empty_input() {
-        let workspace_dir = PathBuf::from("D:/code/puppy_find");
+        let workspace_dir = unique_test_dir();
+        fs::create_dir_all(&workspace_dir).unwrap();
 
         let error = resolve_requested_path(&workspace_dir, "   ").unwrap_err();
 
         assert!(error.to_string().contains("路径不能为空"));
+
+        let _ = fs::remove_dir_all(&workspace_dir);
     }
 
     #[test]
     fn dialog_initial_directory_falls_back_to_existing_parent() {
         let root = unique_test_dir();
-        let child_dir = root.join("materials");
+        let child_dir = root.join("images");
 
         fs::create_dir_all(&child_dir).unwrap();
 
-        let resolved =
-            dialog_initial_directory(&root, Some("./materials/missing/deeper/not-found"));
+        let resolved = dialog_initial_directory(&root, Some("./images/missing/deeper/not-found"));
 
         assert_eq!(resolved, child_dir);
 
@@ -692,12 +694,15 @@ mod tests {
 
     #[test]
     fn display_selected_path_prefers_workspace_relative_format() {
-        let workspace_dir = PathBuf::from("D:/code/puppy_find");
-        let selected = workspace_dir.join("materials").join("corgi");
+        let workspace_dir = unique_test_dir();
+        fs::create_dir_all(workspace_dir.join("images")).unwrap();
+        let selected = workspace_dir.join("images").join("corgi");
 
         let displayed = display_selected_path(&workspace_dir, &selected);
 
-        assert_eq!(displayed, "./materials/corgi");
+        assert_eq!(displayed, "./images/corgi");
+
+        let _ = fs::remove_dir_all(&workspace_dir);
     }
 
     #[test]

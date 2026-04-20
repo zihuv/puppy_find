@@ -14,7 +14,6 @@ const CONFIG_DIR_NAME: &str = "config";
 const ENV_FILE_NAME: &str = ".env";
 const DEFAULT_MODEL_DIR: &str = "./config/model";
 const DEFAULT_LOG_DIR: &str = "./config/log";
-const DEFAULT_ASSET_DIR: &str = "./materials";
 const KEY_DB_PATH: &str = "DB_PATH";
 const KEY_MODEL_PATH: &str = "MODEL_PATH";
 const KEY_MODEL_DIR_LEGACY: &str = "MODEL_DIR";
@@ -152,6 +151,14 @@ fn default_omni_fgclip_max_patches() -> usize {
     256
 }
 
+fn default_asset_dir() -> String {
+    dirs::picture_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join("Pictures")))
+        .unwrap_or_else(|| PathBuf::from("./images"))
+        .to_string_lossy()
+        .into_owned()
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self::defaults()
@@ -169,7 +176,7 @@ impl AppSettings {
             omni_fgclip_max_patches: default_omni_fgclip_max_patches(),
             host: "127.0.0.1".to_owned(),
             port: 3000,
-            asset_dir: DEFAULT_ASSET_DIR.to_owned(),
+            asset_dir: default_asset_dir(),
             log_dir: DEFAULT_LOG_DIR.to_owned(),
         }
     }
@@ -401,7 +408,7 @@ fn config_dir_path(workspace_dir: &Path) -> PathBuf {
 
 fn ensure_default_layout(workspace_dir: &Path) -> Result<()> {
     let defaults = AppSettings::defaults();
-    for relative_path in [&defaults.model_path, &defaults.log_dir, &defaults.asset_dir] {
+    for relative_path in [&defaults.model_path, &defaults.log_dir] {
         let path = resolve_path(workspace_dir, relative_path);
         fs::create_dir_all(&path)
             .with_context(|| format!("failed to create {}", path.display()))?;
@@ -616,16 +623,22 @@ mod tests {
 
     use omni_search::{ProviderPolicy, RuntimeDevice};
 
-    use super::{OmniIntraThreads, env_path, load_or_create, resolve_path, save, validate_db_path};
+    use super::{
+        OmniIntraThreads, default_asset_dir, env_path, load_or_create, quote_env_value,
+        resolve_path, save, validate_db_path,
+    };
 
     #[test]
     fn resolve_path_normalizes_relative_segments() {
-        let workspace_dir = PathBuf::from("D:/code/puppy_find");
+        let workspace_dir = unique_test_dir();
+        fs::create_dir_all(&workspace_dir).unwrap();
 
-        let left = resolve_path(&workspace_dir, "./materials");
-        let right = resolve_path(&workspace_dir, "materials");
+        let left = resolve_path(&workspace_dir, "./images");
+        let right = resolve_path(&workspace_dir, "images");
 
         assert_eq!(left, right);
+
+        let _ = fs::remove_dir_all(&workspace_dir);
     }
 
     #[test]
@@ -650,13 +663,14 @@ mod tests {
 
         assert_eq!(settings.db_path, "./config/puppy_find.db");
         assert_eq!(settings.model_path, "./config/model");
+        assert_eq!(settings.asset_dir, default_asset_dir());
         assert_eq!(settings.log_dir, "./config/log");
         assert_eq!(settings.omni_device, RuntimeDevice::Auto);
         assert_eq!(settings.omni_provider_policy, ProviderPolicy::Interactive);
         assert_eq!(settings.omni_intra_threads, OmniIntraThreads::Auto);
         assert!(workspace_dir.join("config").join("model").is_dir());
         assert!(workspace_dir.join("config").join("log").is_dir());
-        assert!(workspace_dir.join("materials").is_dir());
+        assert!(!workspace_dir.join("materials").exists());
         assert_eq!(
             env_path(&workspace_dir),
             workspace_dir.join("config").join(".env")
@@ -665,6 +679,10 @@ mod tests {
         assert!(env_text.contains("MODEL_PATH=\"./config/model\""));
         assert!(env_text.contains("OMNI_DEVICE=\"auto\""));
         assert!(env_text.contains("OMNI_PROVIDER_POLICY=\"interactive\""));
+        assert!(env_text.contains(&format!(
+            "ASSET_DIR={}",
+            quote_env_value(&settings.asset_dir)
+        )));
         assert!(env_text.contains("LOG_DIR=\"./config/log\""));
 
         let _ = fs::remove_dir_all(&workspace_dir);

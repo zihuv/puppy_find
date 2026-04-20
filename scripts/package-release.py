@@ -37,23 +37,6 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8", newline="\n")
 
 
-def render_default_env(config_dir: str, omni_device: str) -> str:
-    config_dir = config_dir.strip("/\\")
-    return (
-        "# PuppyFind portable configuration\n"
-        'DB_PATH="./puppy_find.db"\n'
-        f'MODEL_PATH="./{config_dir}/model"\n'
-        f'OMNI_DEVICE="{omni_device}"\n'
-        'OMNI_PROVIDER_POLICY="interactive"\n'
-        "OMNI_INTRA_THREADS=auto\n"
-        "OMNI_FGCLIP_MAX_PATCHES=256\n"
-        'HOST="127.0.0.1"\n'
-        "PORT=3000\n"
-        'ASSET_DIR="./materials"\n'
-        f'LOG_DIR="./{config_dir}/log"\n'
-    )
-
-
 def copy_tree_contents(source: Path, destination: Path) -> None:
     for child in source.iterdir():
         if child.name == ".cache":
@@ -128,12 +111,10 @@ def build_bundle(args: argparse.Namespace) -> Path:
 
     config_root = bundle_root / args.config_dir
     config_root.mkdir(parents=True, exist_ok=True)
-    write_text(config_root / ".env", render_default_env(args.config_dir, args.omni_device))
 
     model_dir = config_root / "model"
     model_dir.mkdir()
     (config_root / "log").mkdir()
-    (bundle_root / "materials").mkdir()
 
     if args.flavor == "model":
         if not args.model_source_dir:
