@@ -1351,9 +1351,9 @@ dependencies = [
 
 [[package]]
 name = "omni_search"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87f12a5040e5bb38c036ee76f069fa6687e0749ff4af767b3a60c7836912d568"
+checksum = "d7638bd6a6f571cb056b42d623bfc04531758c93fe9c63e88472a7135c179bc8"
 dependencies = [
  "dotenvy",
  "image",
