@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "puppy_find"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "anyhow",
  "axum",
