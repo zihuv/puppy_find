@@ -263,17 +263,11 @@ button:disabled {
     white-space: nowrap;
 }
 
-.message,
 .error {
     margin: 12px 0 0;
     padding: 10px 12px;
     border-radius: 10px;
     font-size: 0.9rem;
-}
-
-.message {
-    color: var(--success-text);
-    background: var(--success-bg);
 }
 
 .error {

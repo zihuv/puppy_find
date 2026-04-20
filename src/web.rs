@@ -143,11 +143,10 @@ async fn save_settings(
 async fn open_path(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<OpenPathRequest>,
-) -> Result<Json<MessageResponse>, ApiError> {
+) -> Result<StatusCode, ApiError> {
     let target_path = resolve_requested_path(state.workspace_dir(), &payload.path)
         .map_err(ApiError::bad_request)?;
     let target_kind = inspect_open_target(&target_path).map_err(ApiError::bad_request)?;
-    let display_path = target_path.display().to_string();
 
     tokio::task::spawn_blocking(move || open_in_file_manager(&target_path, target_kind))
         .await
@@ -155,9 +154,7 @@ async fn open_path(
         .map_err(ApiError::internal)?
         .map_err(ApiError::internal)?;
 
-    Ok(Json(MessageResponse {
-        message: format!("已打开路径: {display_path}"),
-    }))
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn pick_directory(
@@ -213,29 +210,18 @@ async fn start_index(State(state): State<Arc<AppState>>) -> Result<impl IntoResp
         &asset_dir,
     ))
     .map_err(ApiError::bad_request)?;
-    let sync = sync_runtime_model_index(state.as_ref(), &settings)?;
+    sync_runtime_model_index(state.as_ref(), &settings)?;
 
     if !state.try_start_indexing(total) {
-        return Ok((
-            StatusCode::CONFLICT,
-            Json(MessageResponse {
-                message: "正在执行中".to_owned(),
-            }),
-        ));
+        return Err(ApiError {
+            status: StatusCode::CONFLICT,
+            message: "正在执行中".to_owned(),
+        });
     }
 
     indexer::spawn_indexing(state.as_ref().clone());
 
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(MessageResponse {
-            message: if sync.index_cleared {
-                "检测到模型已变更，已清空旧索引并启动重建".to_owned()
-            } else {
-                "索引任务已启动".to_owned()
-            },
-        }),
-    ))
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn index_status(State(state): State<Arc<AppState>>) -> Json<crate::app_state::IndexStatus> {
@@ -554,11 +540,6 @@ struct SearchResponse {
 struct PickDirectoryResponse {
     path: Option<String>,
     canceled: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct MessageResponse {
-    message: String,
 }
 
 #[derive(Debug, Deserialize)]

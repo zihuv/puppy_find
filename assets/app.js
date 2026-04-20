@@ -19,7 +19,6 @@ function puppyFind() {
         },
         saving: false,
         searching: false,
-        message: '',
         error: '',
         indexError: '',
         pollHandle: null,
@@ -64,7 +63,6 @@ function puppyFind() {
 
             this.saving = true;
             if (!silent) {
-                this.message = '';
                 this.error = '';
             }
 
@@ -110,7 +108,6 @@ function puppyFind() {
                 return;
             }
 
-            this.message = '';
             this.error = '';
             this.indexError = '';
 
@@ -122,7 +119,6 @@ function puppyFind() {
                 if (!response.ok) {
                     throw new Error(data.error || data.message || '启动索引失败');
                 }
-                this.message = data.message || '索引任务已启动。';
                 await this.fetchIndexStatus();
                 await this.fetchRuntimeStatus();
             } catch (error) {
@@ -173,7 +169,6 @@ function puppyFind() {
                 if (!response.ok) {
                     throw new Error(data.error || '打开路径失败');
                 }
-                this.message = data.message || '已打开路径';
             } catch (error) {
                 this.error = error.message;
             }
@@ -214,7 +209,6 @@ function puppyFind() {
 
             this.searching = true;
             this.error = '';
-            this.message = '';
 
             try {
                 const response = await fetch('/api/search', {
@@ -232,9 +226,6 @@ function puppyFind() {
                     throw new Error(data.error || '搜索失败');
                 }
                 this.results = data.items || [];
-                if (!this.results.length) {
-                    this.message = '没有找到相似图片。';
-                }
             } catch (error) {
                 this.error = error.message;
             } finally {
